@@ -128,7 +128,13 @@ const INITIAL_NOTEBOOKS: Notebook[] = [
 
 export default function App() {
   const [viewMode, setViewMode] = useState<AppViewMode>('library');
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('mednotes_dark_mode');
+      if (saved !== null) return JSON.parse(saved);
+    } catch {}
+    return false;
+  });
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [scrollMode, setScrollMode] = useState<'continuous' | 'single'>('continuous');
 
@@ -327,6 +333,9 @@ export default function App() {
     } else {
       document.documentElement.classList.remove('dark');
     }
+    try {
+      localStorage.setItem('mednotes_dark_mode', JSON.stringify(isDarkMode));
+    } catch {}
   }, [isDarkMode]);
 
   // Handle Notebook & Page Changes in Editor
@@ -997,6 +1006,7 @@ export default function App() {
           wallpaperConfig={wallpaperConfig}
           onSaveWallpaperConfig={handleSaveWallpaperConfig}
           isDarkMode={isDarkMode}
+          onToggleDarkMode={() => setIsDarkMode((d) => !d)}
           isCloudConnected={!!cloudAccount}
           cloudAccount={cloudAccount}
           syncStatus={syncInfo.status}

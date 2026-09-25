@@ -21,6 +21,8 @@ import {
   Sparkles,
   Activity,
   Heart,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { GoogleDriveIcon } from '../Icons/GoogleIcons';
 import type { CloudAccount } from '../../services/googleDrive';
@@ -67,6 +69,7 @@ interface DocumentLibraryProps {
   wallpaperConfig: LibraryWallpaperConfig;
   onSaveWallpaperConfig: (config: LibraryWallpaperConfig) => void;
   isDarkMode: boolean;
+  onToggleDarkMode?: () => void;
   isCloudConnected: boolean;
   cloudAccount?: CloudAccount | null;
   syncStatus: 'idle' | 'syncing' | 'success' | 'error';
@@ -95,6 +98,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   wallpaperConfig,
   onSaveWallpaperConfig,
   isDarkMode,
+  onToggleDarkMode,
   isCloudConnected,
   cloudAccount,
   syncStatus,
@@ -244,12 +248,24 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             : 'bg-white border-slate-200 text-slate-700 shadow-2xs'
         }`}
       >
-        {/* macOS Window Controls (Traffic Lights: Red, Yellow, Green) */}
-        <div className="h-12 px-4 flex items-center gap-2 border-b border-slate-100 dark:border-zinc-800">
-          <div className="w-3 h-3 rounded-full bg-[#FF5F56] border border-[#E0443E]" />
-          <div className="w-3 h-3 rounded-full bg-[#FFBD2E] border border-[#DEA123]" />
-          <div className="w-3 h-3 rounded-full bg-[#27C93F] border border-[#1AAB29]" />
-          <span className="font-bold text-xs ml-2 text-slate-800 dark:text-zinc-200">MedNotes</span>
+        {/* macOS Window Controls (Traffic Lights: Red, Yellow, Green) & Dark Mode Toggle */}
+        <div className="h-12 px-4 flex items-center justify-between border-b border-slate-100 dark:border-zinc-800">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-[#FF5F56] border border-[#E0443E]" />
+            <div className="w-3 h-3 rounded-full bg-[#FFBD2E] border border-[#DEA123]" />
+            <div className="w-3 h-3 rounded-full bg-[#27C93F] border border-[#1AAB29]" />
+            <span className="font-bold text-xs ml-2 text-slate-800 dark:text-zinc-200">MedNotes</span>
+          </div>
+
+          {onToggleDarkMode && (
+            <button
+              onClick={onToggleDarkMode}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+              title={isDarkMode ? 'Chuyển sang chế độ Sáng' : 'Chuyển sang chế độ Tối'}
+            >
+              {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-slate-500" />}
+            </button>
+          )}
         </div>
 
         {/* macOS Pill Search Box */}
@@ -534,6 +550,27 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               <Palette className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
               <span className="hidden sm:inline">Hình nền</span>
             </button>
+
+            {/* Dark / Light Mode Toggle Button */}
+            {onToggleDarkMode && (
+              <button
+                onClick={onToggleDarkMode}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 text-xs font-semibold text-slate-700 dark:text-zinc-300 cursor-pointer transition-colors shadow-2xs"
+                title={isDarkMode ? 'Chuyển sang chế độ Sáng' : 'Chuyển sang chế độ Tối'}
+              >
+                {isDarkMode ? (
+                  <>
+                    <Sun className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="hidden sm:inline">Chế độ Sáng</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="hidden sm:inline">Chế độ Tối</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </header>
 
