@@ -54,9 +54,16 @@ interface DocumentLibraryProps {
     coverColor: string,
     coverStyle: NotebookCoverStyle,
     coverIcon?: string,
-    coverLabel?: string
+    coverLabel?: string,
+    coverImage?: string
   ) => void;
-  onUpdateFolder?: (folderId: string, name: string, color?: string, icon?: string) => void;
+  onUpdateFolder?: (
+    folderId: string,
+    name: string,
+    color?: string,
+    icon?: string,
+    coverImage?: string
+  ) => void;
   wallpaperConfig: LibraryWallpaperConfig;
   onSaveWallpaperConfig: (config: LibraryWallpaperConfig) => void;
   isDarkMode: boolean;
@@ -658,11 +665,21 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                         />
                       </svg>
 
-                      {/* Custom Icon Emblem in center of folder */}
-                      {folder.icon && folder.icon !== 'folder' && (
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 p-2 rounded-xl bg-white/70 dark:bg-black/30 backdrop-blur-xs text-slate-800 dark:text-white shadow-xs">
-                          <FolderIconComp className="w-5 h-5 stroke-[2]" />
+                      {/* Custom cover photo or icon emblem in folder */}
+                      {folder.coverImage ? (
+                        <div className="absolute top-[28%] bottom-[6%] left-[4.5%] right-[4.5%] rounded-lg overflow-hidden border border-white/50 shadow-inner z-10">
+                          <img
+                            src={folder.coverImage}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
                         </div>
+                      ) : (
+                        folder.icon && folder.icon !== 'folder' && (
+                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 p-2 rounded-xl bg-white/70 dark:bg-black/30 backdrop-blur-xs text-slate-800 dark:text-white shadow-xs z-10">
+                            <FolderIconComp className="w-5 h-5 stroke-[2]" />
+                          </div>
+                        )
                       )}
 
                       {/* Item count pill inside folder */}
@@ -757,7 +774,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             {/* Notebook Document Cards (Image 1 Style: Pure Bright Paper preview or Custom Cover) */}
             {filteredNotebooks.map((nb) => {
               const isPdf = !!nb.pdfDataUrl;
-              const hasCustomCover = !!nb.coverColor;
+              const hasCustomCover = !!(nb.coverImage || nb.coverColor);
 
               return (
                 <div
@@ -775,7 +792,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                         : 'bg-white border-[#E2E6EA] text-slate-800 shadow-sm'
                     }`}
                     style={
-                      hasCustomCover
+                      hasCustomCover && !nb.coverImage
                         ? {
                             backgroundColor: nb.coverColor,
                             backgroundImage:
@@ -788,6 +805,18 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                         : undefined
                     }
                   >
+                    {/* Custom Cover Photo if set */}
+                    {nb.coverImage && (
+                      <img
+                        src={nb.coverImage}
+                        alt="Cover"
+                        className="absolute inset-0 w-full h-full object-cover z-0"
+                      />
+                    )}
+                    {nb.coverImage && (
+                      <div className="absolute inset-0 bg-black/25 z-0" />
+                    )}
+
                     {/* Top Bookmark Star */}
                     <button
                       onClick={(e) => {
@@ -816,15 +845,15 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                       /* CUSTOM COVER RENDERING */
                       <>
                         {/* Left Spine Ribbon Binding Effect */}
-                        <div className="absolute top-0 left-0 bottom-0 w-2.5 bg-black/30 border-r border-white/10 z-10" />
+                        <div className="absolute top-0 left-0 bottom-0 w-2.5 bg-black/35 border-r border-white/15 z-10" />
 
                         {/* Embossed Stitching for Leather */}
-                        {nb.coverStyle === 'leather' && (
+                        {!nb.coverImage && nb.coverStyle === 'leather' && (
                           <div className="absolute inset-1.5 border border-dashed border-amber-300/40 rounded-lg pointer-events-none z-10" />
                         )}
 
                         {/* Watermark anatomy / medical symbol background */}
-                        {(nb.coverStyle === 'medical' || nb.coverStyle === 'anatomy') && (
+                        {!nb.coverImage && (nb.coverStyle === 'medical' || nb.coverStyle === 'anatomy') && (
                           <div className="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
                             {nb.coverStyle === 'medical' ? (
                               <Activity className="w-24 h-24 text-white stroke-[1]" />
@@ -837,10 +866,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                         {/* Cover Content */}
                         <div className="flex-1 p-2.5 pl-4 flex flex-col justify-between relative select-none z-10">
                           {/* Top Header Label */}
-                          <div className="flex items-center justify-between text-[8px] font-bold text-white/75 tracking-wider uppercase">
+                          <div className="flex items-center justify-between text-[8px] font-bold text-white/90 tracking-wider uppercase drop-shadow-sm">
                             <span>MedNotes</span>
                             {nb.coverIcon && (
-                              <div className="p-0.5 rounded-full bg-white/20 text-white">
+                              <div className="p-0.5 rounded-full bg-white/25 text-white backdrop-blur-xs">
                                 {React.createElement(
                                   COVER_ICONS.find((i) => i.id === nb.coverIcon)?.icon || Sparkles,
                                   { className: 'w-3 h-3' }
@@ -853,7 +882,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                           <div className="my-auto py-1">
                             <div
                               className={`p-2 rounded-lg text-center backdrop-blur-md transition-all ${
-                                nb.coverStyle === 'minimal'
+                                nb.coverImage
+                                  ? 'bg-black/60 text-white border border-white/30 shadow-lg'
+                                  : nb.coverStyle === 'minimal'
                                   ? 'bg-amber-100/95 text-amber-950 border border-amber-300 shadow-xs'
                                   : nb.coverStyle === 'leather'
                                   ? 'bg-amber-950/80 text-amber-100 border border-amber-500/50 shadow-inner'
@@ -870,7 +901,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                           </div>
 
                           {/* Bottom Spine Detail */}
-                          <div className="flex items-center justify-between text-[7px] text-white/60 font-mono">
+                          <div className="flex items-center justify-between text-[7px] text-white/80 font-mono drop-shadow-sm">
                             <span>VOL. I</span>
                             <span>{nb.subject || 'Y khoa'}</span>
                           </div>
@@ -1162,9 +1193,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           isOpen={!!editingCoverNotebook}
           onClose={() => setEditingCoverNotebook(null)}
           notebook={editingCoverNotebook}
-          onSaveCover={(id, color, style, icon, label) => {
+          onSaveCover={(id, color, style, icon, label, coverImage) => {
             if (onUpdateNotebookCover) {
-              onUpdateNotebookCover(id, color, style, icon, label);
+              onUpdateNotebookCover(id, color, style, icon, label, coverImage);
             }
           }}
           isDarkMode={isDarkMode}
@@ -1177,9 +1208,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           isOpen={!!editingFolder}
           onClose={() => setEditingFolder(null)}
           folder={editingFolder}
-          onSaveFolder={(id, name, color, icon) => {
+          onSaveFolder={(id, name, color, icon, coverImage) => {
             if (onUpdateFolder) {
-              onUpdateFolder(id, name, color, icon);
+              onUpdateFolder(id, name, color, icon, coverImage);
             }
           }}
           isDarkMode={isDarkMode}

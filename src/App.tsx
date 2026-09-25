@@ -880,7 +880,8 @@ export default function App() {
     coverColor: string,
     coverStyle: NotebookCoverStyle,
     coverIcon?: string,
-    coverLabel?: string
+    coverLabel?: string,
+    coverImage?: string
   ) => {
     setNotebooks((prev) =>
       prev.map((nb) =>
@@ -891,6 +892,7 @@ export default function App() {
               coverStyle,
               coverIcon,
               coverLabel,
+              coverImage,
               updatedAt: Date.now(),
             }
           : nb
@@ -902,7 +904,8 @@ export default function App() {
     folderId: string,
     name: string,
     color?: string,
-    icon?: string
+    icon?: string,
+    coverImage?: string
   ) => {
     setFolders((prev) =>
       prev.map((f) =>
@@ -912,6 +915,7 @@ export default function App() {
               name,
               color,
               icon,
+              coverImage,
               updatedAt: Date.now(),
             }
           : f

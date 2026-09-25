@@ -32,6 +32,7 @@ export interface Folder {
   name: string;
   color?: string;
   icon?: string;
+  coverImage?: string; // Custom uploaded image or image URL
   createdAt: number;
   updatedAt: number;
 }
@@ -52,6 +53,7 @@ export interface Notebook {
   coverStyle?: NotebookCoverStyle;
   coverIcon?: string;
   coverLabel?: string;
+  coverImage?: string;     // Custom uploaded image or image URL
   createdAt: number;
   updatedAt: number;
 }
@@ -77,11 +79,14 @@ export type LibraryWallpaperType =
   | 'static_library'
   | 'static_greenery'
   | 'static_mountain'
-  | 'custom_image';
+  | 'custom_image'
+  | 'youtube_video';
 
 export interface LibraryWallpaperConfig {
   type: LibraryWallpaperType;
   customImageUrl?: string;
+  youtubeUrl?: string;
+  youtubeVideoId?: string;
   blurLevel: number;
   dimLevel: number;
 }

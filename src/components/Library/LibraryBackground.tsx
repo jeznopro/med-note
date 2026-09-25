@@ -13,6 +13,17 @@ export const STATIC_WALLPAPER_IMAGES: Record<string, string> = {
   static_mountain: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=2000&q=80',
 };
 
+export function extractYouTubeId(url: string): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const regExp = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|live|shorts)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
+  const match = trimmed.match(regExp);
+  return match && match[1] ? match[1] : null;
+}
+
 export const LibraryBackground: React.FC<LibraryBackgroundProps> = ({
   config,
   isDarkMode,
@@ -28,6 +39,11 @@ export const LibraryBackground: React.FC<LibraryBackgroundProps> = ({
     config.type === 'custom_image'
       ? config.customImageUrl
       : STATIC_WALLPAPER_IMAGES[config.type];
+
+  const youtubeVideoId =
+    config.type === 'youtube_video'
+      ? config.youtubeVideoId || (config.youtubeUrl ? extractYouTubeId(config.youtubeUrl) : null)
+      : null;
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
@@ -63,7 +79,7 @@ export const LibraryBackground: React.FC<LibraryBackgroundProps> = ({
         </>
       )}
 
-      {/* 2. Static Wallpaper Image */}
+      {/* 2. Static Wallpaper Image (from URL or Upload) */}
       {isStatic && imageUrl && (
         <div
           className="absolute inset-0 bg-cover bg-center transition-all duration-700"
@@ -75,7 +91,24 @@ export const LibraryBackground: React.FC<LibraryBackgroundProps> = ({
         />
       )}
 
-      {/* 3. Dark/Light Dimming Tint Overlay for maximum legibility */}
+      {/* 3. YouTube Ambient Video Background */}
+      {config.type === 'youtube_video' && youtubeVideoId && (
+        <div
+          className="absolute inset-0 overflow-hidden pointer-events-none transition-all duration-500"
+          style={{
+            filter: `blur(${config.blurLevel}px)`,
+          }}
+        >
+          <iframe
+            src={`https://www.youtube-nocookie.com/embed/${youtubeVideoId}?autoplay=1&mute=1&controls=0&loop=1&playlist=${youtubeVideoId}&playsinline=1&rel=0&showinfo=0&modestbranding=1&iv_load_policy=3&disablekb=1&fs=0`}
+            title="Ambient Study Background"
+            className="w-[130vw] h-[130vh] -top-[15vh] -left-[15vw] absolute object-cover border-0 pointer-events-none"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          />
+        </div>
+      )}
+
+      {/* 4. Dark/Light Dimming Tint Overlay for maximum legibility */}
       <div
         className="absolute inset-0 transition-colors"
         style={{
