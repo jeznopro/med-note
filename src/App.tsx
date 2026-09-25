@@ -1189,7 +1189,7 @@ export default function App() {
 
             <main
               id="editor-main-container"
-              className={`flex-1 overflow-auto flex justify-center relative ${
+              className={`flex-1 overflow-auto relative ${
                 isDarkMode ? 'bg-zinc-950' : 'bg-[#EAEFF5]'
               }`}
               style={{
@@ -1197,7 +1197,7 @@ export default function App() {
               }}
             >
               {scrollMode === 'continuous' ? (
-                <div className="flex flex-col items-center gap-8 py-8 w-full min-h-full">
+                <div className="w-fit min-w-full flex flex-col items-center gap-8 py-8 pb-36 min-h-full">
                   {activeNotebook.pages.map((p, idx) => (
                     <div
                       key={p.id}
@@ -1233,19 +1233,26 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <NoteCanvas
-                  page={currentPage}
-                  notebookId={activeNotebook.id}
-                  pdfDataUrl={activeNotebook.pdfDataUrl}
-                  toolState={toolState}
-                  transform={transform}
-                  isDarkMode={isDarkMode}
-                  history={currentHistory}
-                  onPageChange={handlePageChange}
-                  onHistoryChange={notifyHistoryChange}
-                  isLastPage={isLastPage}
-                  onAutoAddNewPage={handleAutoAddNewPage}
-                />
+                <div className="w-fit min-w-full flex flex-col items-center py-8 pb-36 min-h-full">
+                  <div className="relative flex flex-col items-center">
+                    <div className="text-[11px] font-mono text-slate-400 font-semibold mb-1 select-none">
+                      Trang {activeNotebook.currentPageIndex + 1} / {activeNotebook.pages.length}
+                    </div>
+                    <NoteCanvas
+                      page={currentPage}
+                      notebookId={activeNotebook.id}
+                      pdfDataUrl={activeNotebook.pdfDataUrl}
+                      toolState={toolState}
+                      transform={transform}
+                      isDarkMode={isDarkMode}
+                      history={currentHistory}
+                      onPageChange={handlePageChange}
+                      onHistoryChange={notifyHistoryChange}
+                      isLastPage={isLastPage}
+                      onAutoAddNewPage={handleAutoAddNewPage}
+                    />
+                  </div>
+                </div>
               )}
             </main>
 

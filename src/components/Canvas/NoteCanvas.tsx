@@ -46,6 +46,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
   const isDrawingRef = useRef(false);
   const currentPointsRef = useRef<Point[]>([]);
   const erasedStrokesInSessionRef = useRef<Stroke[]>([]);
+  const panStartRef = useRef<{ clientX: number; clientY: number; scrollLeft: number; scrollTop: number } | null>(null);
 
   const { width, height, template, strokes, pdfPageNumber } = page;
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -185,9 +186,26 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     }
   }, [toolState.currentTool]);
 
-  // Pointer Down (Start stroke or start erasing)
+  // Pointer Down (Start stroke, erase, or pan drag-scroll)
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
+
+    if (toolState.currentTool === 'pan') {
+      const scrollEl = document.getElementById('editor-main-container');
+      if (scrollEl) {
+        panStartRef.current = {
+          clientX: e.clientX,
+          clientY: e.clientY,
+          scrollLeft: scrollEl.scrollLeft,
+          scrollTop: scrollEl.scrollTop,
+        };
+        isDrawingRef.current = true;
+        const canvas = draftCanvasRef.current;
+        if (canvas) canvas.setPointerCapture(e.pointerId);
+      }
+      return;
+    }
+
     e.preventDefault();
 
     const canvas = draftCanvasRef.current;
@@ -256,12 +274,25 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     ctx.restore();
   };
 
-  // Pointer Move (Collect coalesced events for 120Hz-240Hz styluses + update cursor dot)
+  // Pointer Move (Collect coalesced events for 120Hz-240Hz styluses + update cursor dot + Pan drag)
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const pt = getCanvasPoint(e);
     updateCursorDotPosition(pt[0], pt[1]);
 
     if (!isDrawingRef.current) return;
+
+    if (toolState.currentTool === 'pan') {
+      if (panStartRef.current) {
+        const scrollEl = document.getElementById('editor-main-container');
+        if (scrollEl) {
+          const dx = e.clientX - panStartRef.current.clientX;
+          const dy = e.clientY - panStartRef.current.clientY;
+          scrollEl.scrollLeft = panStartRef.current.scrollLeft - dx;
+          scrollEl.scrollTop = panStartRef.current.scrollTop - dy;
+        }
+      }
+      return;
+    }
 
     e.preventDefault();
 
@@ -269,8 +300,6 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
       eraseAtPoint(pt[0], pt[1]);
       return;
     }
-
-    if (toolState.currentTool === 'pan') return;
 
     const nativeEv = e.nativeEvent as unknown as { getCoalescedEvents?: () => PointerEvent[] };
     const coalesced = typeof nativeEv.getCoalescedEvents === 'function'
@@ -285,15 +314,18 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     renderDraftStroke();
   };
 
-  // Pointer Up (Commit stroke)
+  // Pointer Up (Commit stroke or end pan)
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
+    panStartRef.current = null;
 
     const canvas = draftCanvasRef.current;
     if (canvas && canvas.hasPointerCapture(e.pointerId)) {
       canvas.releasePointerCapture(e.pointerId);
     }
+
+    if (toolState.currentTool === 'pan') return;
 
     if (toolState.currentTool === 'eraser') {
       if (erasedStrokesInSessionRef.current.length > 0) {
@@ -409,90 +441,115 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     cursorOpacity = 1;
   }
 
+  const scaledWidth = Math.round(width * transform.scale);
+  const scaledHeight = Math.round(height * transform.scale);
+
   return (
     <div
       ref={containerRef}
-      className="relative flex flex-col items-center justify-center p-4 lg:p-6 transition-colors select-none"
+      className="relative flex flex-col items-center select-none"
       style={{
-        transform: `scale(${transform.scale}) translate(${transform.offsetX}px, ${transform.offsetY}px)`,
-        transformOrigin: 'top center',
+        width: `${scaledWidth}px`,
+        minWidth: `${scaledWidth}px`,
       }}
     >
-      {/* Paper Sheet Container with GoodNotes-style elevation */}
+      {/* Real-dimension layout viewport matching the exact scaled paper size */}
       <div
-        className={`relative shadow-2xl transition-shadow ${
-          isDarkMode
-            ? 'shadow-black/60 ring-1 ring-zinc-800'
-            : 'shadow-slate-400/30 ring-1 ring-slate-200'
-        }`}
         style={{
-          width: `${width}px`,
-          height: `${height}px`,
-          touchAction: 'none',
+          width: `${scaledWidth}px`,
+          height: `${scaledHeight}px`,
+          minWidth: `${scaledWidth}px`,
+          minHeight: `${scaledHeight}px`,
         }}
+        className="relative overflow-visible"
       >
-        {/* Layer 1: Background Canvas (PDF Page or Template lines, grid, dots) */}
-        <canvas
-          ref={bgCanvasRef}
-          width={width * dpr}
-          height={height * dpr}
-          className="absolute inset-0 w-full h-full pointer-events-none rounded-xs"
-        />
-
-        {/* Layer 2: Ink Canvas (Committed Strokes) */}
-        <canvas
-          ref={inkCanvasRef}
-          width={width * dpr}
-          height={height * dpr}
-          className="absolute inset-0 w-full h-full pointer-events-none rounded-xs"
-        />
-
-        {/* Dynamic Pen Tip Dot Cursor (Same color & size as active pen) */}
-        {toolState.currentTool !== 'pan' && (
-          <div
-            ref={cursorDotRef}
-            className="pointer-events-none absolute top-0 left-0 rounded-full z-20 will-change-transform"
-            style={{
-              display: 'none',
-              width: `${cursorSize}px`,
-              height: `${cursorSize}px`,
-              marginLeft: `-${cursorSize / 2}px`,
-              marginTop: `-${cursorSize / 2}px`,
-              backgroundColor: cursorBg,
-              border: cursorBorder,
-              boxShadow: cursorShadow,
-              opacity: cursorOpacity,
-              transition: 'width 0.12s ease, height 0.12s ease, background-color 0.12s ease',
-            }}
-          />
-        )}
-
-        {/* Layer 3: Draft / Interactive Canvas (Pointer events & active stroke) */}
-        <canvas
-          ref={draftCanvasRef}
-          width={width * dpr}
-          height={height * dpr}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onPointerEnter={handlePointerEnter}
-          onPointerLeave={handlePointerLeave}
-          className="absolute inset-0 w-full h-full rounded-xs touch-none"
+        {/* Scaled paper container with transformOrigin: 0 0 */}
+        <div
           style={{
-            cursor:
-              toolState.currentTool === 'pan'
-                ? isDrawingRef.current
-                  ? 'grabbing'
-                  : 'grab'
-                : 'none',
+            width: `${width}px`,
+            height: `${height}px`,
+            transform: `scale(${transform.scale}) translate(${transform.offsetX}px, ${transform.offsetY}px)`,
+            transformOrigin: '0 0',
           }}
-        />
+        >
+          {/* Paper Sheet Container with GoodNotes-style elevation */}
+          <div
+            className={`relative shadow-2xl transition-shadow ${
+              isDarkMode
+                ? 'shadow-black/60 ring-1 ring-zinc-800'
+                : 'shadow-slate-400/30 ring-1 ring-slate-200'
+            }`}
+            style={{
+              width: `${width}px`,
+              height: `${height}px`,
+              touchAction: toolState.currentTool === 'pan' ? 'pan-x pan-y' : 'none',
+            }}
+          >
+            {/* Layer 1: Background Canvas (PDF Page or Template lines, grid, dots) */}
+            <canvas
+              ref={bgCanvasRef}
+              width={width * dpr}
+              height={height * dpr}
+              className="absolute inset-0 w-full h-full pointer-events-none rounded-xs"
+            />
+
+            {/* Layer 2: Ink Canvas (Committed Strokes) */}
+            <canvas
+              ref={inkCanvasRef}
+              width={width * dpr}
+              height={height * dpr}
+              className="absolute inset-0 w-full h-full pointer-events-none rounded-xs"
+            />
+
+            {/* Dynamic Pen Tip Dot Cursor (Same color & size as active pen) */}
+            {toolState.currentTool !== 'pan' && (
+              <div
+                ref={cursorDotRef}
+                className="pointer-events-none absolute top-0 left-0 rounded-full z-20 will-change-transform"
+                style={{
+                  display: 'none',
+                  width: `${cursorSize}px`,
+                  height: `${cursorSize}px`,
+                  marginLeft: `-${cursorSize / 2}px`,
+                  marginTop: `-${cursorSize / 2}px`,
+                  backgroundColor: cursorBg,
+                  border: cursorBorder,
+                  boxShadow: cursorShadow,
+                  opacity: cursorOpacity,
+                  transition: 'width 0.12s ease, height 0.12s ease, background-color 0.12s ease',
+                }}
+              />
+            )}
+
+            {/* Layer 3: Draft / Interactive Canvas (Pointer events & active stroke) */}
+            <canvas
+              ref={draftCanvasRef}
+              width={width * dpr}
+              height={height * dpr}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              onPointerEnter={handlePointerEnter}
+              onPointerLeave={handlePointerLeave}
+              className="absolute inset-0 w-full h-full rounded-xs"
+              style={{
+                touchAction: toolState.currentTool === 'pan' ? 'pan-x pan-y' : 'none',
+                cursor:
+                  toolState.currentTool === 'pan'
+                    ? isDrawingRef.current
+                      ? 'grabbing'
+                      : 'grab'
+                    : 'none',
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       {/* If this is the last page, show the GoodNotes-style pull-to-add / next-page prompt */}
       {isLastPage && (
-        <div className="w-full flex flex-col items-center gap-2 pt-6 pb-12 select-none">
+        <div className="w-full flex flex-col items-center gap-2 pt-8 pb-14 select-none">
           <button
             onClick={() => onAutoAddNewPage?.(true)}
             className="flex items-center gap-2 px-6 py-3 rounded-full bg-white dark:bg-zinc-800 border border-slate-300 dark:border-zinc-700 shadow-md hover:shadow-lg hover:border-blue-500 text-xs font-bold text-blue-600 dark:text-blue-400 cursor-pointer transition-all hover:scale-102"
