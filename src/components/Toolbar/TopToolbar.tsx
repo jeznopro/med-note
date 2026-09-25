@@ -21,6 +21,8 @@ import {
   Download,
   Image as ImageIcon,
   RefreshCw,
+  ScrollText,
+  FileText,
 } from 'lucide-react';
 import { GoogleDriveIcon } from '../Icons/GoogleIcons';
 import type { CloudAccount } from '../../services/googleDrive';
@@ -58,6 +60,9 @@ interface TopToolbarProps {
   onPrevPage: () => void;
   onNextPage: () => void;
   onAddPage: () => void;
+  onSelectPage?: (index: number) => void;
+  scrollMode?: 'continuous' | 'single';
+  onToggleScrollMode?: () => void;
   currentTemplate: PageTemplate;
   onTemplateChange: (template: PageTemplate) => void;
   zoom: number;
@@ -100,6 +105,9 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
   onPrevPage,
   onNextPage,
   onAddPage,
+  onSelectPage,
+  scrollMode = 'continuous',
+  onToggleScrollMode,
   currentTemplate,
   onTemplateChange,
   zoom,
@@ -111,6 +119,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showPageJump, setShowPageJump] = useState(false);
 
   const activeColor =
     toolState.currentTool === 'highlighter'
@@ -584,40 +593,112 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
             )}
           </div>
 
-          {/* Page navigation */}
-          <div className="flex items-center gap-1 bg-slate-100/90 dark:bg-zinc-800 px-2 py-0.5 rounded-lg text-xs">
+          {/* Scroll Mode Toggle (Continuous Vertical vs Single Page) */}
+          {onToggleScrollMode && (
             <button
-              onClick={onPrevPage}
-              disabled={currentPageIndex <= 0}
-              className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-            <span className="font-mono px-1 font-medium text-[11px]">
-              {currentPageIndex + 1} / {totalPages}
-            </span>
-            <button
-              onClick={onNextPage}
-              className={`p-1 rounded cursor-pointer transition-colors ${
-                currentPageIndex >= totalPages - 1
-                  ? 'hover:bg-blue-100 text-blue-600 font-bold'
-                  : 'hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300'
+              onClick={onToggleScrollMode}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-xs cursor-pointer transition-all shadow-2xs ${
+                scrollMode === 'continuous'
+                  ? 'border-blue-300 dark:border-blue-700 bg-blue-50/80 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-semibold'
+                  : 'border-slate-200 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-400'
               }`}
               title={
-                currentPageIndex >= totalPages - 1
-                  ? 'Đang ở trang cuối • Bấm để tự động tạo và sang trang mới'
-                  : 'Trang tiếp theo'
+                scrollMode === 'continuous'
+                  ? 'Đang ở chế độ: Cuộn dọc liên tục (như GoodNotes) • Bấm để chuyển sang từng trang'
+                  : 'Đang ở chế độ: Từng trang • Bấm để chuyển sang cuộn dọc liên tục'
               }
             >
-              <ChevronRight className="w-3.5 h-3.5" />
+              {scrollMode === 'continuous' ? (
+                <>
+                  <ScrollText className="w-3.5 h-3.5 text-blue-500" />
+                  <span className="hidden xl:inline text-[11px]">Cuộn liên tục</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="w-3.5 h-3.5" />
+                  <span className="hidden xl:inline text-[11px]">Từng trang</span>
+                </>
+              )}
             </button>
-            <button
-              onClick={onAddPage}
-              title="Thêm trang mới"
-              className="p-1 ml-1 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-600 rounded cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
+          )}
+
+          {/* Page navigation with Quick Jump popup */}
+          <div className="relative">
+            <div className="flex items-center gap-1 bg-slate-100/90 dark:bg-zinc-800 px-2 py-0.5 rounded-lg text-xs">
+              <button
+                onClick={onPrevPage}
+                disabled={currentPageIndex <= 0}
+                className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
+                title="Trang trước (←)"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setShowPageJump(!showPageJump)}
+                className="font-mono px-1 font-bold text-[11px] hover:text-blue-600 cursor-pointer hover:underline flex items-center gap-0.5"
+                title="Bấm để chọn nhanh trang"
+              >
+                <span>
+                  {currentPageIndex + 1} / {totalPages}
+                </span>
+                <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+              </button>
+              <button
+                onClick={onNextPage}
+                className={`p-1 rounded cursor-pointer transition-colors ${
+                  currentPageIndex >= totalPages - 1
+                    ? 'hover:bg-blue-100 text-blue-600 font-bold'
+                    : 'hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300'
+                }`}
+                title={
+                  currentPageIndex >= totalPages - 1
+                    ? 'Đang ở trang cuối • Bấm để tự động tạo và sang trang mới'
+                    : 'Trang tiếp theo (→)'
+                }
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={onAddPage}
+                title="Thêm trang mới"
+                className="p-1 ml-0.5 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-600 rounded cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Quick Page Jump Dropdown */}
+            {showPageJump && onSelectPage && (
+              <div
+                className={`absolute top-9 right-0 p-2 rounded-xl border shadow-2xl z-50 w-44 max-h-60 overflow-y-auto ${
+                  isDarkMode
+                    ? 'bg-zinc-900 border-zinc-700 text-zinc-200'
+                    : 'bg-white border-slate-200 text-slate-800'
+                }`}
+              >
+                <div className="text-[10px] font-bold px-2 py-1 text-slate-400 uppercase">
+                  Nhảy tới trang ({totalPages} trang)
+                </div>
+                <div className="grid grid-cols-4 gap-1.5 p-1">
+                  {Array.from({ length: totalPages }).map((_, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        onSelectPage(idx);
+                        setShowPageJump(false);
+                      }}
+                      className={`h-7 rounded-md font-mono text-xs font-semibold flex items-center justify-center transition-colors cursor-pointer ${
+                        idx === currentPageIndex
+                          ? 'bg-blue-600 text-white font-bold'
+                          : 'hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300'
+                      }`}
+                    >
+                      {idx + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Zoom Controls */}

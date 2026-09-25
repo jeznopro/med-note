@@ -11,6 +11,8 @@ import { createNotebookFromPdf } from './pdf/pdfLoader';
 import { exportNotebookAsPdf, exportCurrentPageAsPng } from './pdf/pdfExporter';
 import { GoogleDriveService, type CloudAccount, type SyncStatusInfo } from './services/googleDrive';
 import { CloudSettingsModal } from './components/Modals/CloudSettingsModal';
+import { BottomPageNav } from './components/Toolbar/BottomPageNav';
+import { deletePdfBinary } from './services/pdfStorage';
 
 const STORAGE_KEY_FOLDERS = 'mednotes_library_folders_v2';
 const STORAGE_KEY_NOTEBOOKS = 'mednotes_library_notebooks_v2';
@@ -101,6 +103,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState<AppViewMode>('library');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [scrollMode, setScrollMode] = useState<'continuous' | 'single'>('continuous');
 
   // Library State (Persisted in LocalStorage)
   const [folders, setFolders] = useState<Folder[]>(() => {
@@ -283,6 +286,21 @@ export default function App() {
     );
   };
 
+  const handleSpecificPageChange = (pageIndex: number, updatedPage: Page) => {
+    setNotebooks((prev) =>
+      prev.map((nb) => {
+        if (nb.id !== activeNotebookId) return nb;
+        const updatedPages = [...nb.pages];
+        updatedPages[pageIndex] = updatedPage;
+        return {
+          ...nb,
+          pages: updatedPages,
+          updatedAt: Date.now(),
+        };
+      })
+    );
+  };
+
   // Google Drive Auto-Sync Debounce (3s after user finishes writing/modifying)
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -404,8 +422,36 @@ export default function App() {
       setNotebooks((prev) =>
         prev.map((nb) => (nb.id === activeNotebookId ? { ...nb, currentPageIndex: index } : nb))
       );
+      if (scrollMode === 'continuous') {
+        setTimeout(() => {
+          const el = document.getElementById(`page-container-${index}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 50);
+      }
     }
   };
+
+  // Keyboard navigation shortcuts: ArrowLeft / ArrowRight / PageUp / PageDown
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (viewMode !== 'editor') return;
+      const tagName = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tagName === 'input' || tagName === 'textarea') return;
+
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        handlePrevPage();
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        e.preventDefault();
+        handleNextPage();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [viewMode, activeNotebook.currentPageIndex, activeNotebook.pages.length]);
 
   const isLastPage = activeNotebook.currentPageIndex >= activeNotebook.pages.length - 1;
 
@@ -551,6 +597,7 @@ export default function App() {
       const importedNb = await createNotebookFromPdf(file);
       importedNb.folderId = folderId || null;
       setNotebooks((prev) => [importedNb, ...prev]);
+      setScrollMode('continuous');
       handleOpenNotebook(importedNb);
     } catch (err) {
       console.error('Failed to import PDF:', err);
@@ -576,6 +623,7 @@ export default function App() {
   };
 
   const handleDeleteNotebook = (notebookId: string) => {
+    deletePdfBinary(notebookId).catch(() => {});
     setNotebooks((prev) => prev.filter((n) => n.id !== notebookId));
     setOpenNotebookIds((prev) => prev.filter((id) => id !== notebookId));
     if (activeNotebookId === notebookId) {
@@ -748,6 +796,9 @@ export default function App() {
             onPrevPage={handlePrevPage}
             onNextPage={handleNextPage}
             onAddPage={handleAddPage}
+            onSelectPage={handleSelectPage}
+            scrollMode={scrollMode}
+            onToggleScrollMode={() => setScrollMode((m) => (m === 'continuous' ? 'single' : 'continuous'))}
             currentTemplate={currentPage.template}
             onTemplateChange={handleTemplateChange}
             zoom={transform.scale}
@@ -766,6 +817,8 @@ export default function App() {
               onToggle={() => setIsSidebarOpen((o) => !o)}
               pages={activeNotebook.pages}
               currentPageIndex={activeNotebook.currentPageIndex}
+              notebookId={activeNotebook.id}
+              pdfDataUrl={activeNotebook.pdfDataUrl}
               onSelectPage={handleSelectPage}
               onAddPage={handleAddPage}
               onDuplicatePage={handleDuplicatePage}
@@ -774,6 +827,7 @@ export default function App() {
             />
 
             <main
+              id="editor-main-container"
               className={`flex-1 overflow-auto flex justify-center relative ${
                 isDarkMode ? 'bg-zinc-950' : 'bg-[#EAEFF5]'
               }`}
@@ -781,19 +835,71 @@ export default function App() {
                 touchAction: toolState.currentTool === 'pan' ? 'pan-x pan-y' : 'none',
               }}
             >
-              <NoteCanvas
-                page={currentPage}
-                pdfDataUrl={activeNotebook.pdfDataUrl}
-                toolState={toolState}
-                transform={transform}
-                isDarkMode={isDarkMode}
-                history={currentHistory}
-                onPageChange={handlePageChange}
-                onHistoryChange={notifyHistoryChange}
-                isLastPage={isLastPage}
-                onAutoAddNewPage={handleAutoAddNewPage}
-              />
+              {scrollMode === 'continuous' ? (
+                <div className="flex flex-col items-center gap-8 py-8 w-full min-h-full">
+                  {activeNotebook.pages.map((p, idx) => (
+                    <div
+                      key={p.id}
+                      id={`page-container-${idx}`}
+                      className="relative flex flex-col items-center"
+                      onClick={() => {
+                        if (activeNotebook.currentPageIndex !== idx) {
+                          setNotebooks((prev) =>
+                            prev.map((nb) =>
+                              nb.id === activeNotebookId ? { ...nb, currentPageIndex: idx } : nb
+                            )
+                          );
+                        }
+                      }}
+                    >
+                      <div className="text-[11px] font-mono text-slate-400 font-semibold mb-1 select-none">
+                        Trang {idx + 1} / {activeNotebook.pages.length}
+                      </div>
+                      <NoteCanvas
+                        page={p}
+                        notebookId={activeNotebook.id}
+                        pdfDataUrl={activeNotebook.pdfDataUrl}
+                        toolState={toolState}
+                        transform={transform}
+                        isDarkMode={isDarkMode}
+                        history={getPageHistory(p.id)}
+                        onPageChange={(updatedPage) => handleSpecificPageChange(idx, updatedPage)}
+                        onHistoryChange={notifyHistoryChange}
+                        isLastPage={idx === activeNotebook.pages.length - 1}
+                        onAutoAddNewPage={handleAutoAddNewPage}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <NoteCanvas
+                  page={currentPage}
+                  notebookId={activeNotebook.id}
+                  pdfDataUrl={activeNotebook.pdfDataUrl}
+                  toolState={toolState}
+                  transform={transform}
+                  isDarkMode={isDarkMode}
+                  history={currentHistory}
+                  onPageChange={handlePageChange}
+                  onHistoryChange={notifyHistoryChange}
+                  isLastPage={isLastPage}
+                  onAutoAddNewPage={handleAutoAddNewPage}
+                />
+              )}
             </main>
+
+            {/* Bottom Floating Navigation Toolbar */}
+            <BottomPageNav
+              currentPageIndex={activeNotebook.currentPageIndex}
+              totalPages={activeNotebook.pages.length}
+              onPrevPage={handlePrevPage}
+              onNextPage={handleNextPage}
+              onAddPage={handleAddPage}
+              onSelectPage={handleSelectPage}
+              scrollMode={scrollMode}
+              onToggleScrollMode={() => setScrollMode((m) => (m === 'continuous' ? 'single' : 'continuous'))}
+              isDarkMode={isDarkMode}
+            />
           </div>
         </div>
       )}

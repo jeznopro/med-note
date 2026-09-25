@@ -1,6 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { Notebook, Page } from '../types/document';
+import { savePdfBinary, getPdfBinary } from '../services/pdfStorage';
 
 // Configure pdfjs worker with fallback
 if (typeof window !== 'undefined') {
@@ -14,31 +15,87 @@ if (typeof window !== 'undefined') {
 // Cache loaded PDF documents in memory
 const pdfDocCache = new Map<string, pdfjsLib.PDFDocumentProxy>();
 const activeRenderTasks = new WeakMap<HTMLCanvasElement, { cancel: () => void }>();
+const thumbnailCache = new Map<string, string>();
 
-export async function getPdfDocument(source: string | ArrayBuffer | Uint8Array): Promise<pdfjsLib.PDFDocumentProxy> {
-  const cacheKey = typeof source === 'string' ? source : 'active_pdf_buffer';
+export async function getPdfDocument(
+  source: string | ArrayBuffer | Uint8Array,
+  notebookId?: string
+): Promise<pdfjsLib.PDFDocumentProxy> {
+  // 1. Check notebookId cache first if available
+  if (notebookId && pdfDocCache.has(notebookId)) {
+    return pdfDocCache.get(notebookId)!;
+  }
+
+  // 2. Check string/buffer cache key
+  const cacheKey = typeof source === 'string' && source ? source : notebookId || 'active_pdf_buffer';
   if (pdfDocCache.has(cacheKey)) {
     return pdfDocCache.get(cacheKey)!;
   }
 
+  let binaryData: Uint8Array | null = null;
+
+  if (source instanceof Uint8Array) {
+    binaryData = source;
+  } else if (source instanceof ArrayBuffer) {
+    binaryData = new Uint8Array(source);
+  } else if (typeof source === 'string' && source.startsWith('data:')) {
+    // Base64 data URL
+    const base64 = source.split(',')[1];
+    const binaryStr = atob(base64);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    binaryData = bytes;
+  } else if (typeof source === 'string' && source.startsWith('blob:')) {
+    // Test if blob URL is still alive
+    try {
+      const resp = await fetch(source, { method: 'HEAD' });
+      if (!resp.ok) {
+        throw new Error('Blob URL revoked');
+      }
+    } catch {
+      // Blob URL revoked after refresh! Recover from IndexedDB if notebookId is known
+      if (notebookId) {
+        const storedBuffer = await getPdfBinary(notebookId);
+        if (storedBuffer) {
+          binaryData = new Uint8Array(storedBuffer);
+        }
+      }
+    }
+  }
+
+  // If still no binary data and we have notebookId, try IndexedDB
+  if (!binaryData && notebookId) {
+    const storedBuffer = await getPdfBinary(notebookId);
+    if (storedBuffer) {
+      binaryData = new Uint8Array(storedBuffer);
+    }
+  }
+
   let loadingTask: pdfjsLib.PDFDocumentLoadingTask;
 
-  if (typeof source === 'string') {
+  if (binaryData) {
+    loadingTask = pdfjsLib.getDocument({
+      data: binaryData,
+      cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
+      cMapPacked: true,
+    });
+  } else if (typeof source === 'string' && source) {
     loadingTask = pdfjsLib.getDocument({
       url: source,
       cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
       cMapPacked: true,
     });
   } else {
-    loadingTask = pdfjsLib.getDocument({
-      data: source instanceof Uint8Array ? source : new Uint8Array(source),
-      cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
-      cMapPacked: true,
-    });
+    throw new Error('No PDF source or stored data found');
   }
 
   const pdfDoc = await loadingTask.promise;
   pdfDocCache.set(cacheKey, pdfDoc);
+  if (notebookId) {
+    pdfDocCache.set(notebookId, pdfDoc);
+  }
   return pdfDoc;
 }
 
@@ -123,16 +180,69 @@ export async function renderPdfPageToContext(
   }
 }
 
+// Generate miniature thumbnail data URL for a specific PDF page
+export async function getPdfThumbnail(
+  pdfDoc: pdfjsLib.PDFDocumentProxy,
+  pageNumber: number,
+  notebookId: string,
+  thumbWidth = 140
+): Promise<string> {
+  const thumbKey = `${notebookId}_page_${pageNumber}_w${thumbWidth}`;
+  if (thumbnailCache.has(thumbKey)) {
+    return thumbnailCache.get(thumbKey)!;
+  }
+
+  try {
+    const page = await pdfDoc.getPage(pageNumber);
+    const unscaledViewport = page.getViewport({ scale: 1.0 });
+    const scale = thumbWidth / unscaledViewport.width;
+    const thumbHeight = Math.round(unscaledViewport.height * scale);
+    const viewport = page.getViewport({ scale });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = thumbWidth;
+    canvas.height = thumbHeight;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return '';
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, thumbWidth, thumbHeight);
+
+    const renderTask = (page as unknown as {
+      render: (ctx: unknown) => { promise: Promise<void> };
+    }).render({
+      canvasContext: ctx,
+      viewport,
+    });
+
+    await renderTask.promise;
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    thumbnailCache.set(thumbKey, dataUrl);
+    return dataUrl;
+  } catch (e) {
+    console.warn(`Failed to generate thumbnail for page ${pageNumber}:`, e);
+    return '';
+  }
+}
+
 export async function createNotebookFromPdf(file: File): Promise<Notebook> {
   const arrayBuffer = await file.arrayBuffer();
   const uint8Array = new Uint8Array(arrayBuffer);
 
-  // Create a blob URL for fast zero-overhead loading
+  const notebookId = `nb_pdf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+  // 1. Persist PDF binary in IndexedDB immediately so it never disappears on refresh
+  await savePdfBinary(notebookId, arrayBuffer, file.name);
+
+  // 2. Create blob URL for in-memory session access
   const blobUrl = URL.createObjectURL(new Blob([uint8Array], { type: 'application/pdf' }));
 
-  const pdfDoc = await getPdfDocument(blobUrl);
-  const numPages = pdfDoc.numPages;
+  // 3. Load PDF document directly from memory buffer
+  const pdfDoc = await getPdfDocument(uint8Array, notebookId);
+  pdfDocCache.set(blobUrl, pdfDoc);
+  pdfDocCache.set(notebookId, pdfDoc);
 
+  const numPages = pdfDoc.numPages;
   const pages: Page[] = [];
 
   for (let i = 1; i <= numPages; i++) {
@@ -143,7 +253,7 @@ export async function createNotebookFromPdf(file: File): Promise<Notebook> {
     const standardHeight = Math.round((standardWidth * viewport.height) / viewport.width);
 
     pages.push({
-      id: `page_pdf_${Date.now()}_${i}`,
+      id: `page_pdf_${notebookId}_${i}`,
       pageNumber: i,
       width: standardWidth,
       height: standardHeight,
@@ -156,7 +266,7 @@ export async function createNotebookFromPdf(file: File): Promise<Notebook> {
   const cleanTitle = file.name.replace(/\.pdf$/i, '');
 
   return {
-    id: `nb_pdf_${Date.now()}`,
+    id: notebookId,
     title: cleanTitle,
     subject: 'Tài liệu PDF',
     pdfDataUrl: blobUrl,
