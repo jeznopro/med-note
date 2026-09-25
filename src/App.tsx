@@ -421,6 +421,43 @@ export default function App() {
     setCloudAccount(acc);
     setSyncInfo((prev) => ({ ...prev, status: 'syncing' }));
     try {
+      // 1. Check if user already has notebooks backed up on Google Drive!
+      const remoteData = await gdrive.downloadLibraryFromDrive(acc);
+      if (remoteData && remoteData.notebooks.length > 0) {
+        const isLocalSampleOnly =
+          notebooks.length <= 4 &&
+          notebooks.every((n) => INITIAL_NOTEBOOKS.some((init) => init.id === n.id));
+
+        if (isLocalSampleOnly) {
+          // If this is a new device (like a phone with just default sample notebooks), load user's actual notebooks!
+          setNotebooks(remoteData.notebooks);
+          if (remoteData.folders && remoteData.folders.length > 0) {
+            setFolders(remoteData.folders);
+          }
+          setSyncInfo({
+            status: 'success',
+            lastSyncTime: Date.now(),
+            syncedFilesCount: remoteData.notebooks.length,
+          });
+          return;
+        } else {
+          // Merge remote notebooks that aren't present locally
+          const localIds = new Set(notebooks.map((n) => n.id));
+          const missingFromLocal = remoteData.notebooks.filter((n) => !localIds.has(n.id));
+          if (missingFromLocal.length > 0) {
+            setNotebooks((prev) => [...prev, ...missingFromLocal]);
+          }
+          if (remoteData.folders) {
+            const localFolderIds = new Set(folders.map((f) => f.id));
+            const missingFolders = remoteData.folders.filter((f) => !localFolderIds.has(f.id));
+            if (missingFolders.length > 0) {
+              setFolders((prev) => [...prev, ...missingFolders]);
+            }
+          }
+        }
+      }
+
+      // 2. Sync local notebooks to Drive
       await gdrive.syncAllNotebooks(
         notebooks,
         acc,

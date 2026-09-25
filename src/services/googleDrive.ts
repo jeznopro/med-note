@@ -1,4 +1,4 @@
-import type { Notebook } from '../types/document';
+import type { Notebook, Folder } from '../types/document';
 
 export interface CloudAccount {
   email: string;
@@ -516,6 +516,179 @@ export class GoogleDriveService {
     }
   }
 
+  // Master backup of all notebooks and folders to a single sync file on Google Drive
+  public async uploadMasterLibrary(
+    notebooks: Notebook[],
+    folders: Folder[],
+    account: CloudAccount
+  ): Promise<void> {
+    if (account.accessToken.startsWith('demo_token_')) {
+      const cloudStorageKey = `mednotes_gdrive_cloud_${account.email}`;
+      const payload = {
+        version: 2,
+        timestamp: Date.now(),
+        folders,
+        notebooks,
+      };
+      localStorage.setItem(cloudStorageKey, JSON.stringify(payload));
+      return;
+    }
+
+    try {
+      const rootFolderId = await this.getOrCreateBackupFolder(account.accessToken);
+      const manifestName = 'mednotes_library_backup.json';
+      const q = `name='${manifestName}' and '${rootFolderId}' in parents and trashed=false`;
+      const searchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
+        { headers: { Authorization: `Bearer ${account.accessToken}` } }
+      );
+
+      let targetId: string | null = null;
+      if (searchRes.ok) {
+        const data = await searchRes.json();
+        if (data.files && data.files.length > 0) {
+          targetId = data.files[0].id;
+        }
+      }
+
+      if (!targetId) {
+        const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${account.accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: manifestName,
+            parents: [rootFolderId],
+            mimeType: 'application/json',
+          }),
+        });
+        if (createRes.ok) {
+          const data = await createRes.json();
+          targetId = data.id;
+        }
+      }
+
+      if (targetId) {
+        const payload = JSON.stringify({
+          version: 2,
+          timestamp: Date.now(),
+          folders,
+          notebooks,
+        });
+        const blob = new Blob([payload], { type: 'application/json' });
+        await fetch(
+          `https://www.googleapis.com/upload/drive/v3/files/${targetId}?uploadType=media`,
+          {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${account.accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: blob,
+          }
+        );
+      }
+    } catch (e) {
+      console.warn('Failed to upload master library backup to Drive:', e);
+    }
+  }
+
+  // Pull / Download whole library from Google Drive
+  public async downloadLibraryFromDrive(
+    account: CloudAccount
+  ): Promise<{ notebooks: Notebook[]; folders: Folder[] } | null> {
+    if (account.accessToken.startsWith('demo_token_')) {
+      const cloudStorageKey = `mednotes_gdrive_cloud_${account.email}`;
+      const saved = localStorage.getItem(cloudStorageKey);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed && Array.isArray(parsed.notebooks)) {
+            return {
+              notebooks: parsed.notebooks,
+              folders: parsed.folders || [],
+            };
+          }
+        } catch {}
+      }
+      return null;
+    }
+
+    try {
+      const rootFolderId = await this.getOrCreateBackupFolder(account.accessToken);
+      // 1. Try to find mednotes_library_backup.json first
+      const manifestName = 'mednotes_library_backup.json';
+      const q = `name='${manifestName}' and '${rootFolderId}' in parents and trashed=false`;
+      const searchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
+        { headers: { Authorization: `Bearer ${account.accessToken}` } }
+      );
+
+      if (searchRes.ok) {
+        const data = await searchRes.json();
+        if (data.files && data.files.length > 0) {
+          const fileId = data.files[0].id;
+          const downloadRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+            { headers: { Authorization: `Bearer ${account.accessToken}` } }
+          );
+          if (downloadRes.ok) {
+            const libraryData = await downloadRes.json();
+            if (libraryData && Array.isArray(libraryData.notebooks)) {
+              return {
+                notebooks: libraryData.notebooks,
+                folders: libraryData.folders || [],
+              };
+            }
+          }
+        }
+      }
+
+      // 2. Fallback: Search for all individual .mednote.json files in MedNotes_Backup and subfolders
+      const qAll = `name contains '.mednote.json' and trashed=false`;
+      const searchAllRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qAll)}&fields=files(id,name)&pageSize=100`,
+        { headers: { Authorization: `Bearer ${account.accessToken}` } }
+      );
+
+      if (searchAllRes.ok) {
+        const allFilesData = await searchAllRes.json();
+        if (allFilesData.files && allFilesData.files.length > 0) {
+          const downloadedNotebooks: Notebook[] = [];
+          for (const f of allFilesData.files) {
+            try {
+              const res = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`,
+                { headers: { Authorization: `Bearer ${account.accessToken}` } }
+              );
+              if (res.ok) {
+                const nb = await res.json();
+                if (nb && nb.id && Array.isArray(nb.pages)) {
+                  downloadedNotebooks.push(nb);
+                }
+              }
+            } catch (err) {
+              console.warn('Error reading notebook file from Drive:', f.name, err);
+            }
+          }
+          if (downloadedNotebooks.length > 0) {
+            return {
+              notebooks: downloadedNotebooks,
+              folders: [],
+            };
+          }
+        }
+      }
+
+      return null;
+    } catch (e) {
+      console.error('Failed to download library from Drive:', e);
+      throw e;
+    }
+  }
+
   // Sync all notebooks (with folder hierarchy)
   public async syncAllNotebooks(
     notebooks: Notebook[],
@@ -540,6 +713,10 @@ export class GoogleDriveService {
       if (onProgress) {
         onProgress(i + 1, notebooks.length);
       }
+    }
+
+    if (folders) {
+      await this.uploadMasterLibrary(notebooks, folders as Folder[], account);
     }
   }
 }

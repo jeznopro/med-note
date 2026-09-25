@@ -72,6 +72,8 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
   const [backupSuccessMsg, setBackupSuccessMsg] = useState<string | null>(null);
   const [isCleaningJson, setIsCleaningJson] = useState(false);
   const [cleanJsonMsg, setCleanJsonMsg] = useState<string | null>(null);
+  const [isPulling, setIsPulling] = useState(false);
+  const [pullMessage, setPullMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -83,6 +85,30 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
     navigator.clipboard.writeText(currentOrigin);
     setCopiedOrigin(true);
     setTimeout(() => setCopiedOrigin(false), 2000);
+  };
+
+  const handlePullFromDrive = async () => {
+    if (!account) return;
+    setIsPulling(true);
+    setPullMessage(null);
+    try {
+      const data = await gdrive.downloadLibraryFromDrive(account);
+      if (data && data.notebooks.length > 0) {
+        if (onRestoreLibrary) {
+          onRestoreLibrary(data.notebooks, data.folders);
+        }
+        setPullMessage(`✅ Đã tải thành công ${data.notebooks.length} sổ tay từ Drive về máy này!`);
+        setTimeout(() => setPullMessage(null), 6000);
+      } else {
+        setPullMessage('ℹ️ Chưa tìm thấy bản sao lưu nào trên tài khoản Google Drive này.');
+        setTimeout(() => setPullMessage(null), 6000);
+      }
+    } catch (e) {
+      setPullMessage('❌ Lỗi khi tải dữ liệu từ Drive: ' + (e as Error).message);
+      setTimeout(() => setPullMessage(null), 6000);
+    } finally {
+      setIsPulling(false);
+    }
   };
 
   const handleCleanOldJson = async () => {
@@ -201,7 +227,7 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
           </button>
         </div>
 
-        {/* Navigation Tabs (Google Drive vs Offline Backup) */}
+        {/* Navigation Tabs (Google Drive vs Transfer to Phone/Device) */}
         <div className="flex border-b border-inherit px-6 pt-2 gap-4 text-xs font-semibold">
           <button
             onClick={() => setActiveTab('drive')}
@@ -224,7 +250,7 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
             }`}
           >
             <HardDrive className="w-3.5 h-3.5" />
-            <span>Sao lưu máy tính (Offline)</span>
+            <span>📱 Chuyển sang Điện thoại (10s)</span>
           </button>
         </div>
 
@@ -279,28 +305,28 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
                     <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-300 text-xs space-y-2">
                       <div className="flex items-center gap-1.5 font-bold">
                         <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>Dữ liệu đang lưu an toàn trên máy bạn (Chưa tải lên drive.google.com thật)</span>
+                        <span>Tại sao mở trên điện thoại dữ liệu lại chưa thấy?</span>
                       </div>
                       <p className="text-[11px] leading-relaxed opacity-90">
-                        Vì lý do bảo mật của Google, để thư mục <code>MedNotes_Backup</code> tự động xuất hiện trên ứng dụng <strong>drive.google.com</strong> thật, bạn cần bấm xác thực tài khoản Google qua <strong>Google Cloud OAuth Client ID</strong>.
+                        Bạn đang ở chế độ <strong>Đăng nhập nhanh (Chỉ lưu trong máy hiện tại)</strong>. Để chuyển toàn bộ sổ tay sang điện thoại ngay trong 10 giây mà không cần cài đặt gì, bạn chỉ cần bấm nút bên dưới:
                       </p>
                       <div className="pt-0.5 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('offline')}
+                          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] cursor-pointer shadow-2xs"
+                        >
+                          📱 Chuyển dữ liệu sang Điện thoại ngay (10s)
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
                             onSignOut();
                             setShowAdvancedOAuth(true);
                           }}
-                          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] cursor-pointer shadow-2xs"
+                          className="px-3 py-1.5 rounded-lg border border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-200 font-semibold text-[11px] cursor-pointer"
                         >
                           ⚙️ Thiết lập kết nối Google Drive thật
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleOfflineExport}
-                          className="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 font-semibold text-[11px] cursor-pointer"
-                        >
-                          📥 Tải file sao lưu về máy (.json)
                         </button>
                       </div>
                     </div>
@@ -324,15 +350,34 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Manual Sync Button */}
-                  <button
-                    onClick={onManualSync}
-                    disabled={syncInfo.status === 'syncing'}
-                    className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors disabled:opacity-50 shadow-xs"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${syncInfo.status === 'syncing' ? 'animate-spin' : ''}`} />
-                    <span>{syncInfo.status === 'syncing' ? 'Đang đồng bộ PDF vào thư mục...' : 'Đồng bộ & Xuất PDF vào từng thư mục'}</span>
-                  </button>
+                  {/* Manual Sync & Pull Buttons */}
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      onClick={onManualSync}
+                      disabled={syncInfo.status === 'syncing' || isPulling}
+                      className="py-2.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 shadow-xs"
+                      title="Đẩy tất cả sổ tay trên máy này lên Google Drive"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span className="truncate">{syncInfo.status === 'syncing' ? 'Đang đẩy lên...' : 'Đẩy dữ liệu lên Drive'}</span>
+                    </button>
+
+                    <button
+                      onClick={handlePullFromDrive}
+                      disabled={isPulling || syncInfo.status === 'syncing'}
+                      className="py-2.5 px-2 rounded-xl border border-blue-300 dark:border-blue-800 bg-blue-50/80 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 shadow-xs"
+                      title="Kéo toàn bộ sổ tay từ Google Drive về máy này"
+                    >
+                      <Download className={`w-3.5 h-3.5 ${isPulling ? 'animate-bounce' : ''}`} />
+                      <span className="truncate">{isPulling ? 'Đang tải về...' : 'Tải dữ liệu từ Drive về'}</span>
+                    </button>
+                  </div>
+
+                  {pullMessage && (
+                    <div className="p-2.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-300 text-xs text-center font-medium">
+                      {pullMessage}
+                    </div>
+                  )}
 
                   {/* Format indicator & Clean up old .json files button */}
                   <div className="pt-2 border-t border-inherit space-y-1.5">
@@ -562,8 +607,21 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
               </div>
             </>
           ) : (
-            /* Offline Backup Tab */
+            /* Offline / Cross-Device Phone Transfer Tab */
             <div className="space-y-4 text-xs">
+              {/* 3-Step Phone Transfer Helper Guide */}
+              <div className="p-4 rounded-2xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-xs space-y-2.5">
+                <div className="font-bold text-blue-900 dark:text-blue-200 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-blue-600" />
+                  <span>Cách chuyển toàn bộ sổ tay sang Điện thoại / iPad trong 10 giây:</span>
+                </div>
+                <ol className="list-decimal pl-4 space-y-1.5 text-[11px] text-slate-700 dark:text-zinc-300 leading-relaxed">
+                  <li><strong>Bước 1 (Trên máy tính/iPad đang có dữ liệu):</strong> Bấm nút màu xanh <em>"Tải toàn bộ thư viện về máy (.json)"</em> ở bên dưới.</li>
+                  <li><strong>Bước 2:</strong> Gửi file vừa tải sang điện thoại của bạn qua <strong>Zalo (chọn gửi file), AirDrop, Telegram hoặc Messenger</strong>.</li>
+                  <li><strong>Bước 3 (Trên điện thoại):</strong> Mở web trên điện thoại, bấm vào nút Google Drive -&gt; Chọn tab này và bấm <em>"Chọn file để khôi phục"</em>. Toàn bộ sách, ghi chú, nét vẽ Cornell sẽ xuất hiện ngay lập tức!</li>
+                </ol>
+              </div>
+
               {backupSuccessMsg && (
                 <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
