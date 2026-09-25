@@ -30,7 +30,6 @@ import {
 } from 'lucide-react';
 import { GoogleDriveIcon } from '../Icons/GoogleIcons';
 import type { CloudAccount } from '../../services/googleDrive';
-import { exportNotebookAsPdf } from '../../pdf/pdfExporter';
 import { NewNotebookModal } from '../Modals/NewNotebookModal';
 import { EditCoverModal, COVER_ICONS } from '../Modals/EditCoverModal';
 import { EditFolderModal, FOLDER_COLORS, FOLDER_ICONS } from '../Modals/EditFolderModal';
@@ -1205,9 +1204,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                         </button>
 
                         <button
-                          onClick={() => {
-                            exportNotebookAsPdf(nb, isDarkMode);
+                          onClick={async () => {
                             setActiveMenuId(null);
+                            const { exportNotebookAsPdf } = await import('../../pdf/pdfExporter');
+                            await exportNotebookAsPdf(nb, isDarkMode);
                           }}
                           className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer transition-colors"
                         >

@@ -1,27 +1,18 @@
-import * as pdfjsLib from 'pdfjs-dist';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import type { Notebook, Page } from '../types/document';
 import { savePdfBinary, getPdfBinary } from '../services/pdfStorage';
-
-// Configure pdfjs worker with fallback
-if (typeof window !== 'undefined') {
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
-  } catch {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-  }
-}
+import { initPdfjs } from './pdfWorker';
 
 // Cache loaded PDF documents & in-flight promises
-const pdfDocCache = new Map<string, pdfjsLib.PDFDocumentProxy>();
-const pdfDocPromiseCache = new Map<string, Promise<pdfjsLib.PDFDocumentProxy>>();
+const pdfDocCache = new Map<string, PDFDocumentProxy>();
+const pdfDocPromiseCache = new Map<string, Promise<PDFDocumentProxy>>();
 
 // Cache loaded PDF page proxies (worker communication deduplication)
-const pageProxyCache = new Map<string, Promise<pdfjsLib.PDFPageProxy>>();
+const pageProxyCache = new Map<string, Promise<PDFPageProxy>>();
 
 // High-speed LRU memory cache for rendered PDF pages (instant tab switching & smooth scrolling)
 const renderedPageCache = new Map<string, HTMLCanvasElement>();
-const MAX_RENDERED_PAGES_CACHE = 24;
+const MAX_RENDERED_PAGES_CACHE = 16;
 
 // Active render tasks per target canvas
 const activeRenderTasks = new WeakMap<HTMLCanvasElement, { cancel: () => void }>();
@@ -36,6 +27,25 @@ export function cancelActiveRender(canvas: HTMLCanvasElement): void {
       // Ignore cancellation exceptions
     }
     activeRenderTasks.delete(canvas);
+  }
+}
+
+/**
+ * A4/A5: Cleanup pdf.js page resources when a page unmounts or leaves viewport
+ */
+export function cleanupPdfPage(notebookId: string | undefined, pageNumber: number): void {
+  const pageProxyKey = `${notebookId || 'doc'}_page_${pageNumber}`;
+  const pagePromise = pageProxyCache.get(pageProxyKey);
+  if (pagePromise) {
+    pagePromise
+      .then((p) => {
+        try {
+          p.cleanup();
+        } catch {
+          // Ignore cleanup exceptions
+        }
+      })
+      .catch(() => {});
   }
 }
 
@@ -77,7 +87,7 @@ function queueThumbnailTask(task: () => Promise<void>): Promise<void> {
 export async function getPdfDocument(
   source: string | ArrayBuffer | Uint8Array,
   notebookId?: string
-): Promise<pdfjsLib.PDFDocumentProxy> {
+): Promise<PDFDocumentProxy> {
   const primaryKey = notebookId || (typeof source === 'string' && source ? source : 'active_pdf_buffer');
 
   // 1. Check resolved document cache
@@ -96,50 +106,36 @@ export async function getPdfDocument(
     return pdfDocPromiseCache.get(notebookId)!;
   }
 
-  // 3. Initiate single loading promise
+  // 3. Lazy load pdfjs-dist and initiate single loading promise (A1 & C1)
   const loadPromise = (async () => {
+    const pdfjsLib = await initPdfjs();
     let binaryData: Uint8Array | null = null;
 
-    if (source instanceof Uint8Array) {
-      binaryData = source;
-    } else if (source instanceof ArrayBuffer) {
-      binaryData = new Uint8Array(source);
-    } else if (typeof source === 'string' && source.startsWith('data:')) {
-      // Base64 data URL
-      const base64 = source.split(',')[1];
-      const binaryStr = atob(base64);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) {
-        bytes[i] = binaryStr.charCodeAt(i);
-      }
-      binaryData = bytes;
-    } else if (typeof source === 'string' && source.startsWith('blob:')) {
-      // Test if blob URL is still alive
-      try {
-        const resp = await fetch(source, { method: 'HEAD' });
-        if (!resp.ok) {
-          throw new Error('Blob URL revoked');
-        }
-      } catch {
-        // Blob URL revoked after refresh! Recover from IndexedDB if notebookId is known
-        if (notebookId) {
-          const storedBuffer = await getPdfBinary(notebookId);
-          if (storedBuffer) {
-            binaryData = new Uint8Array(storedBuffer);
-          }
-        }
-      }
-    }
-
-    // If still no binary data and we have notebookId, try IndexedDB
-    if (!binaryData && notebookId) {
+    // C1: Prefer reading directly from IndexedDB by notebookId without holding duplicate ArrayBuffers in React state
+    if (notebookId) {
       const storedBuffer = await getPdfBinary(notebookId);
       if (storedBuffer) {
         binaryData = new Uint8Array(storedBuffer);
       }
     }
 
-    let loadingTask: pdfjsLib.PDFDocumentLoadingTask;
+    if (!binaryData) {
+      if (source instanceof Uint8Array) {
+        binaryData = source;
+      } else if (source instanceof ArrayBuffer) {
+        binaryData = new Uint8Array(source);
+      } else if (typeof source === 'string' && source.startsWith('data:')) {
+        const base64 = source.split(',')[1];
+        const binaryStr = atob(base64);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        binaryData = bytes;
+      }
+    }
+
+    let loadingTask: ReturnType<typeof pdfjsLib.getDocument>;
 
     if (binaryData) {
       loadingTask = pdfjsLib.getDocument({
@@ -179,19 +175,22 @@ export async function getPdfDocument(
 }
 
 export async function renderPdfPageToContext(
-  pdfDoc: pdfjsLib.PDFDocumentProxy,
+  pdfDoc: PDFDocumentProxy,
   pageNumber: number,
   canvas: HTMLCanvasElement,
   targetWidth: number,
   targetHeight: number,
   dpr: number = 1,
-  notebookId?: string
+  notebookId?: string,
+  onRegisterRenderTask?: (task: { cancel: () => void }) => void
 ): Promise<void> {
   // Cancel previous render on this canvas if active
   cancelActiveRender(canvas);
 
-  const pixelWidth = Math.round(targetWidth * dpr);
-  const pixelHeight = Math.round(targetHeight * dpr);
+  // A4: Cap DPI to prevent GPU memory exhaustion on high-density screens
+  const cappedDpr = Math.min(dpr, 2.0);
+  const pixelWidth = Math.round(targetWidth * cappedDpr);
+  const pixelHeight = Math.round(targetHeight * cappedDpr);
   const cacheKey = `${notebookId || 'pdf'}_p${pageNumber}_${pixelWidth}x${pixelHeight}`;
 
   // Instant path: reuse cached rendered page offscreen canvas (0.1ms render!)
@@ -202,7 +201,7 @@ export async function renderPdfPageToContext(
       mainCtx.save();
       mainCtx.setTransform(1, 0, 0, 1, 0, 0);
       mainCtx.clearRect(0, 0, canvas.width, canvas.height);
-      mainCtx.drawImage(cachedCanvas, 0, 0);
+      mainCtx.drawImage(cachedCanvas, 0, 0, canvas.width, canvas.height);
       mainCtx.restore();
     }
     return;
@@ -252,6 +251,10 @@ export async function renderPdfPageToContext(
     });
 
     activeRenderTasks.set(canvas, renderTask);
+    if (onRegisterRenderTask) {
+      onRegisterRenderTask(renderTask);
+    }
+
     await renderTask.promise;
     activeRenderTasks.delete(canvas);
 
@@ -269,7 +272,7 @@ export async function renderPdfPageToContext(
     mainCtx.save();
     mainCtx.setTransform(1, 0, 0, 1, 0, 0);
     mainCtx.clearRect(0, 0, canvas.width, canvas.height);
-    mainCtx.drawImage(offscreen, 0, 0);
+    mainCtx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
     mainCtx.restore();
   } catch (err: unknown) {
     if ((err as { name?: string })?.name === 'RenderingCancelledException') {
@@ -282,7 +285,7 @@ export async function renderPdfPageToContext(
 
 // Generate miniature thumbnail data URL with concurrency limiting and cache
 export async function getPdfThumbnail(
-  pdfDoc: pdfjsLib.PDFDocumentProxy,
+  pdfDoc: PDFDocumentProxy,
   pageNumber: number,
   notebookId: string,
   thumbWidth = 140
@@ -294,7 +297,6 @@ export async function getPdfThumbnail(
 
   return new Promise<string>((resolve) => {
     queueThumbnailTask(async () => {
-      // Re-check cache in case it was resolved while queued
       if (thumbnailCache.has(thumbKey)) {
         resolve(thumbnailCache.get(thumbKey)!);
         return;
@@ -347,19 +349,13 @@ export async function getPdfThumbnail(
 
 export async function createNotebookFromPdf(file: File): Promise<Notebook> {
   const arrayBuffer = await file.arrayBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
-
   const notebookId = `nb_pdf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-  // 1. Persist PDF binary in IndexedDB immediately so it never disappears on refresh
+  // C1: Persist PDF binary in IndexedDB once so pdf.js reads directly from IndexedDB
   await savePdfBinary(notebookId, arrayBuffer, file.name);
 
-  // 2. Create blob URL for in-memory session access
-  const blobUrl = URL.createObjectURL(new Blob([uint8Array], { type: 'application/pdf' }));
-
-  // 3. Load PDF document directly from memory buffer
-  const pdfDoc = await getPdfDocument(uint8Array, notebookId);
-  pdfDocCache.set(blobUrl, pdfDoc);
+  // Load PDF document via pdf.js
+  const pdfDoc = await getPdfDocument(new Uint8Array(arrayBuffer), notebookId);
   pdfDocCache.set(notebookId, pdfDoc);
 
   const numPages = pdfDoc.numPages;
@@ -381,6 +377,10 @@ export async function createNotebookFromPdf(file: File): Promise<Notebook> {
       strokes: [],
       pdfPageNumber: i,
     });
+    // Free page resources immediately after reading dimensions
+    try {
+      pdfPage.cleanup();
+    } catch {}
   }
 
   const cleanTitle = file.name.replace(/\.pdf$/i, '');
@@ -389,7 +389,8 @@ export async function createNotebookFromPdf(file: File): Promise<Notebook> {
     id: notebookId,
     title: cleanTitle,
     subject: 'Tài liệu PDF',
-    pdfDataUrl: blobUrl,
+    // C1: Do not store huge base64 or redundant memory blobs; notebookId resolves directly from IndexedDB
+    pdfDataUrl: `idb://${notebookId}`,
     pdfFileName: file.name,
     pages,
     currentPageIndex: 0,

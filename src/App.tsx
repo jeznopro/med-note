@@ -16,14 +16,13 @@ import { PageHistory } from './engine/history';
 import { TopToolbar } from './components/Toolbar/TopToolbar';
 import { PageSidebar } from './components/Sidebar/PageSidebar';
 import { NoteCanvas } from './components/Canvas/NoteCanvas';
-import { VirtualContinuousPage } from './components/Canvas/VirtualContinuousPage';
+import { VirtualizedPageList } from './components/Canvas/VirtualContinuousPage';
 import { DocumentLibrary } from './components/Library/DocumentLibrary';
 import { createNotebookFromPdf } from './pdf/pdfLoader';
-import { exportNotebookAsPdf, exportCurrentPageAsPng, generateNotebookPdfBlob } from './pdf/pdfExporter';
 import { GoogleDriveService, type CloudAccount, type SyncStatusInfo } from './services/googleDrive';
 import { CloudSettingsModal } from './components/Modals/CloudSettingsModal';
 import { BottomPageNav } from './components/Toolbar/BottomPageNav';
-import { deletePdfBinary } from './services/pdfStorage';
+import { deletePdfBinary, saveNotebooksToIdb, loadNotebooksFromIdb } from './services/pdfStorage';
 
 const STORAGE_KEY_FOLDERS = 'mednotes_library_folders_v2';
 const STORAGE_KEY_NOTEBOOKS = 'mednotes_library_notebooks_v2';
@@ -220,13 +219,67 @@ export default function App() {
     }
   }, [folders]);
 
+  // C3: Restore notebooks from IndexedDB if available and newer/larger than localStorage fallback
   useEffect(() => {
+    loadNotebooksFromIdb().then((idbNotebooks) => {
+      if (idbNotebooks && idbNotebooks.length > 0) {
+        setNotebooks((prev) => {
+          const isPrevDefault =
+            prev.length <= 4 && prev.every((n) => INITIAL_NOTEBOOKS.some((init) => init.id === n.id));
+          return isPrevDefault || idbNotebooks.length >= prev.length ? idbNotebooks : prev;
+        });
+      }
+    });
+  }, []);
+
+  // C3: Debounce writing notebooks to IndexedDB & LocalStorage (every 1.5s or on tab hide/close)
+  // Prevents blocking main thread with JSON serialization every time user lifts the pen!
+  const latestNotebooksRef = useRef<Notebook[]>(notebooks);
+  latestNotebooksRef.current = notebooks;
+  const saveDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushNotebooksToStorage = useCallback((dataToSave: Notebook[]) => {
+    saveNotebooksToIdb(dataToSave);
     try {
-      localStorage.setItem(STORAGE_KEY_NOTEBOOKS, JSON.stringify(notebooks));
+      localStorage.setItem(STORAGE_KEY_NOTEBOOKS, JSON.stringify(dataToSave));
     } catch (e) {
-      console.warn('Failed to save notebooks to localStorage', e);
+      // If localStorage hits 5MB quota, IndexedDB still safely holds the full notebooks state
+      console.warn('localStorage quota exceeded, persisted full state in IndexedDB:', e);
     }
-  }, [notebooks]);
+  }, []);
+
+  useEffect(() => {
+    if (saveDebounceTimerRef.current) {
+      clearTimeout(saveDebounceTimerRef.current);
+    }
+    saveDebounceTimerRef.current = setTimeout(() => {
+      flushNotebooksToStorage(notebooks);
+      saveDebounceTimerRef.current = null;
+    }, 1500);
+
+    return () => {
+      if (saveDebounceTimerRef.current) {
+        clearTimeout(saveDebounceTimerRef.current);
+      }
+    };
+  }, [notebooks, flushNotebooksToStorage]);
+
+  // Immediate flush when user switches tab, locks screen, or closes browser
+  useEffect(() => {
+    const handleVisibilityOrUnload = () => {
+      if (saveDebounceTimerRef.current) {
+        clearTimeout(saveDebounceTimerRef.current);
+        saveDebounceTimerRef.current = null;
+        flushNotebooksToStorage(latestNotebooksRef.current);
+      }
+    };
+    window.addEventListener('beforeunload', handleVisibilityOrUnload);
+    document.addEventListener('visibilitychange', handleVisibilityOrUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleVisibilityOrUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityOrUnload);
+    };
+  }, [flushNotebooksToStorage]);
 
   useEffect(() => {
     try {
@@ -457,6 +510,7 @@ export default function App() {
       try {
         let pdfBlob: Blob | undefined;
         try {
+          const { generateNotebookPdfBlob } = await import('./pdf/pdfExporter');
           pdfBlob = await generateNotebookPdfBlob(activeNotebook, isDarkMode);
         } catch (pdfErr) {
           console.warn('Could not generate PDF blob for auto-sync', pdfErr);
@@ -536,7 +590,10 @@ export default function App() {
         acc,
         folders,
         undefined,
-        async (nb) => generateNotebookPdfBlob(nb, isDarkMode)
+        async (nb) => {
+          const { generateNotebookPdfBlob } = await import('./pdf/pdfExporter');
+          return generateNotebookPdfBlob(nb, isDarkMode);
+        }
       );
       setSyncInfo({
         status: 'success',
@@ -572,7 +629,10 @@ export default function App() {
         cloudAccount,
         folders,
         undefined,
-        async (nb) => generateNotebookPdfBlob(nb, isDarkMode)
+        async (nb) => {
+          const { generateNotebookPdfBlob } = await import('./pdf/pdfExporter');
+          return generateNotebookPdfBlob(nb, isDarkMode);
+        }
       );
       setSyncInfo({
         status: 'success',
@@ -1153,10 +1213,20 @@ export default function App() {
             onSelectTab={setActiveNotebookId}
             onCloseTab={handleCloseTab}
             onNewTab={() => handleCreateNotebook('Sổ tay mới', 'cornell', currentFolderId)}
-            onExportPdf={() => exportNotebookAsPdf(activeNotebook, isDarkMode)}
-            onExportPng={() =>
-              exportCurrentPageAsPng(currentPage, activeNotebook.title, activeNotebook.pdfDataUrl, isDarkMode)
-            }
+            onExportPdf={async () => {
+              const { exportNotebookAsPdf } = await import('./pdf/pdfExporter');
+              await exportNotebookAsPdf(activeNotebook, isDarkMode);
+            }}
+            onExportPng={async () => {
+              const { exportCurrentPageAsPng } = await import('./pdf/pdfExporter');
+              await exportCurrentPageAsPng(
+                currentPage,
+                activeNotebook.title,
+                activeNotebook.pdfDataUrl,
+                isDarkMode,
+                activeNotebook.id
+              );
+            }}
             isCloudConnected={!!cloudAccount}
             cloudAccount={cloudAccount}
             syncStatus={syncInfo.status}
@@ -1246,37 +1316,29 @@ export default function App() {
               }}
             >
               {scrollMode === 'continuous' ? (
-                <div className="w-fit min-w-full flex flex-col items-center gap-8 py-8 pb-36 min-h-full">
-                  {activeNotebook.pages.map((p, idx) => (
-                    <VirtualContinuousPage
-                      key={p.id}
-                      page={p}
-                      index={idx}
-                      total={activeNotebook.pages.length}
-                      isActive={activeNotebook.currentPageIndex === idx}
-                      notebookId={activeNotebook.id}
-                      pdfDataUrl={activeNotebook.pdfDataUrl}
-                      toolState={toolState}
-                      transform={transform}
-                      isDarkMode={isDarkMode}
-                      history={getPageHistory(p.id)}
-                      onPageChange={(updatedPage) => handleSpecificPageChange(idx, updatedPage)}
-                      onHistoryChange={notifyHistoryChange}
-                      isLastPage={idx === activeNotebook.pages.length - 1}
-                      onAutoAddNewPage={handleAutoAddNewPage}
-                      isPencilMode={isPencilMode}
-                      onSelectPage={(index) => {
-                        if (activeNotebook.currentPageIndex !== index) {
-                          setNotebooks((prev) =>
-                            prev.map((nb) =>
-                              nb.id === activeNotebookId ? { ...nb, currentPageIndex: index } : nb
-                            )
-                          );
-                        }
-                      }}
-                    />
-                  ))}
-                </div>
+                <VirtualizedPageList
+                  pages={activeNotebook.pages}
+                  currentPageIndex={activeNotebook.currentPageIndex}
+                  notebookId={activeNotebook.id}
+                  pdfDataUrl={activeNotebook.pdfDataUrl}
+                  toolState={toolState}
+                  transform={transform}
+                  isDarkMode={isDarkMode}
+                  getPageHistory={getPageHistory}
+                  onSpecificPageChange={handleSpecificPageChange}
+                  onHistoryChange={notifyHistoryChange}
+                  onAutoAddNewPage={handleAutoAddNewPage}
+                  isPencilMode={isPencilMode}
+                  onSelectPage={(index) => {
+                    if (activeNotebook.currentPageIndex !== index) {
+                      setNotebooks((prev) =>
+                        prev.map((nb) =>
+                          nb.id === activeNotebookId ? { ...nb, currentPageIndex: index } : nb
+                        )
+                      );
+                    }
+                  }}
+                />
               ) : (
                 <div className="w-fit min-w-full flex flex-col items-center py-8 pb-36 min-h-full">
                   <div className="relative flex flex-col items-center">

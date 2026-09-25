@@ -1,107 +1,106 @@
-// IndexedDB storage service for PDF binary files
-// Ensures multi-page PDFs persist across browser reloads and tab closures without hitting localStorage quota
+// IndexedDB storage service using lightweight `idb` wrapper (C1 & C3)
+// Stores PDF binary ArrayBuffers once in IndexedDB without keeping duplicate copies in RAM/React state.
+
+import { openDB, type IDBPDatabase } from 'idb';
+import type { Notebook } from '../types/document';
 
 const DB_NAME = 'MedNotes_PDF_Storage';
-const DB_VERSION = 1;
-const STORE_NAME = 'pdf_documents';
+const DB_VERSION = 2;
+const PDF_STORE_NAME = 'pdf_documents';
+const NOTEBOOKS_STORE_NAME = 'notebooks_state';
 
-// Fast in-memory buffer cache
-const memoryBufferCache = new Map<string, ArrayBuffer>();
-
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined' || !window.indexedDB) {
-      reject(new Error('IndexedDB not supported in this environment'));
-      return;
-    }
-
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+interface PdfRecord {
+  id: string;
+  fileName: string;
+  buffer: ArrayBuffer;
+  updatedAt: number;
 }
 
+let dbPromise: Promise<IDBPDatabase> | null = null;
+
+function getDb(): Promise<IDBPDatabase> {
+  if (!dbPromise) {
+    dbPromise = openDB(DB_NAME, DB_VERSION, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains(PDF_STORE_NAME)) {
+          db.createObjectStore(PDF_STORE_NAME, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(NOTEBOOKS_STORE_NAME)) {
+          db.createObjectStore(NOTEBOOKS_STORE_NAME);
+        }
+      },
+    });
+  }
+  return dbPromise;
+}
+
+/**
+ * C1: Save original PDF ArrayBuffer once into IndexedDB on import/sync.
+ * Does NOT retain a duplicate ArrayBuffer copy in JS memory.
+ */
 export async function savePdfBinary(
   notebookId: string,
   buffer: ArrayBuffer,
   fileName: string
 ): Promise<void> {
-  // 1. Cache in memory
-  memoryBufferCache.set(notebookId, buffer);
-
-  // 2. Persist in IndexedDB
   try {
-    const db = await openDatabase();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([STORE_NAME], 'readwrite');
-      const store = transaction.objectStore(STORE_NAME);
-      const record = {
-        id: notebookId,
-        fileName,
-        buffer,
-        updatedAt: Date.now(),
-      };
-      const req = store.put(record);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
+    const db = await getDb();
+    const record: PdfRecord = {
+      id: notebookId,
+      fileName,
+      buffer,
+      updatedAt: Date.now(),
+    };
+    await db.put(PDF_STORE_NAME, record);
   } catch (err) {
-    console.warn('Failed to save PDF to IndexedDB, fallback to memory cache only:', err);
+    console.warn('Failed to save PDF to IndexedDB via idb:', err);
   }
 }
 
+/**
+ * C1: Read PDF ArrayBuffer directly from IndexedDB when pdf.js opens the document.
+ */
 export async function getPdfBinary(notebookId: string): Promise<ArrayBuffer | null> {
-  // 1. Check in-memory cache first
-  if (memoryBufferCache.has(notebookId)) {
-    return memoryBufferCache.get(notebookId)!;
-  }
-
-  // 2. Load from IndexedDB
   try {
-    const db = await openDatabase();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([STORE_NAME], 'readonly');
-      const store = transaction.objectStore(STORE_NAME);
-      const req = store.get(notebookId);
-
-      req.onsuccess = () => {
-        if (req.result && req.result.buffer) {
-          const buffer = req.result.buffer as ArrayBuffer;
-          memoryBufferCache.set(notebookId, buffer);
-          resolve(buffer);
-        } else {
-          resolve(null);
-        }
-      };
-
-      req.onerror = () => reject(req.error);
-    });
+    const db = await getDb();
+    const record = (await db.get(PDF_STORE_NAME, notebookId)) as PdfRecord | undefined;
+    if (record && record.buffer) {
+      return record.buffer;
+    }
+    return null;
   } catch (err) {
-    console.warn('Failed to load PDF from IndexedDB:', err);
+    console.warn('Failed to load PDF from IndexedDB via idb:', err);
     return null;
   }
 }
 
 export async function deletePdfBinary(notebookId: string): Promise<void> {
-  memoryBufferCache.delete(notebookId);
   try {
-    const db = await openDatabase();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([STORE_NAME], 'readwrite');
-      const store = transaction.objectStore(STORE_NAME);
-      const req = store.delete(notebookId);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
+    const db = await getDb();
+    await db.delete(PDF_STORE_NAME, notebookId);
   } catch (err) {
-    console.warn('Failed to delete PDF from IndexedDB:', err);
+    console.warn('Failed to delete PDF from IndexedDB via idb:', err);
+  }
+}
+
+/**
+ * C3: Debounced background persistence of Notebooks (including compact Float32 stroke data) to IndexedDB.
+ */
+export async function saveNotebooksToIdb(notebooks: Notebook[]): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.put(NOTEBOOKS_STORE_NAME, notebooks, 'library_notebooks');
+  } catch (err) {
+    console.warn('Failed to save notebooks to IndexedDB:', err);
+  }
+}
+
+export async function loadNotebooksFromIdb(): Promise<Notebook[] | null> {
+  try {
+    const db = await getDb();
+    const saved = await db.get(NOTEBOOKS_STORE_NAME, 'library_notebooks');
+    return Array.isArray(saved) ? (saved as Notebook[]) : null;
+  } catch {
+    return null;
   }
 }

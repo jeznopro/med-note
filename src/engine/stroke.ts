@@ -17,7 +17,91 @@ export interface StrokeOptions {
   };
 }
 
-export function getPenStrokeOptions(size: number): StrokeOptions {
+// WeakMap cache so committed strokes NEVER re-run `getStroke()` from perfect-freehand (B1/B2)
+const committedOutlineCache = new WeakMap<Stroke, number[][]>();
+
+// Runtime Float32Array cache per stroke for ultra-low memory footprint (C2)
+const runtimeFloat32Cache = new WeakMap<Stroke, Float32Array>();
+
+/**
+ * C2: Pack Point[] ([x, y, pressure][]) into a compact Float32Array ([x0, y0, p0, x1, y1, p1, ...])
+ */
+export function packPointsToFloat32(points: Point[]): Float32Array {
+  const arr = new Float32Array(points.length * 3);
+  for (let i = 0; i < points.length; i++) {
+    const pt = points[i];
+    const base = i * 3;
+    arr[base] = Math.round(pt[0] * 100) / 100;
+    arr[base + 1] = Math.round(pt[1] * 100) / 100;
+    arr[base + 2] = Math.round((pt[2] ?? 0.5) * 1000) / 1000;
+  }
+  return arr;
+}
+
+/**
+ * C2: Unpack Float32Array or flat number[] back to Point[] when needed by perfect-freehand
+ */
+export function unpackFloat32ToPoints(flat: Float32Array | number[]): Point[] {
+  const count = Math.floor(flat.length / 3);
+  const pts: Point[] = new Array(count);
+  for (let i = 0; i < count; i++) {
+    const base = i * 3;
+    pts[i] = [flat[base], flat[base + 1], flat[base + 2]];
+  }
+  return pts;
+}
+
+/**
+ * Retrieve points from a Stroke, supporting both compact `flatPoints` (Float32Array/number[]) and legacy `points`
+ */
+export function getStrokePoints(stroke: Stroke): Point[] {
+  if (stroke.points && stroke.points.length > 0) {
+    return stroke.points;
+  }
+  const cachedTyped = runtimeFloat32Cache.get(stroke);
+  if (cachedTyped) {
+    return unpackFloat32ToPoints(cachedTyped);
+  }
+  if (stroke.flatPoints && stroke.flatPoints.length >= 3) {
+    if (!(stroke.flatPoints instanceof Float32Array)) {
+      const f32 = new Float32Array(stroke.flatPoints);
+      runtimeFloat32Cache.set(stroke, f32);
+      return unpackFloat32ToPoints(f32);
+    }
+    return unpackFloat32ToPoints(stroke.flatPoints);
+  }
+  return [];
+}
+
+/**
+ * C2: Create a memory-optimized Stroke object using Float32Array & flat numeric array
+ */
+export function createCompactStroke(
+  id: string,
+  tool: 'pen' | 'highlighter',
+  color: string,
+  size: number,
+  opacity: number,
+  points: Point[]
+): Stroke {
+  const f32 = packPointsToFloat32(points);
+  // Keep flat number[] for JSON serialization compatibility while storing Float32Array in WeakMap
+  const flatArray = Array.from(f32);
+  const stroke: Stroke = {
+    id,
+    tool,
+    color,
+    size,
+    opacity,
+    points, // preserved for backward compatibility
+    flatPoints: flatArray,
+    createdAt: Date.now(),
+  };
+  runtimeFloat32Cache.set(stroke, f32);
+  return stroke;
+}
+
+export function getPenStrokeOptions(size: number, isSlidingSegment = false): StrokeOptions {
   return {
     size,
     thinning: 0.45,       // subtle pressure sensitivity
@@ -25,7 +109,7 @@ export function getPenStrokeOptions(size: number): StrokeOptions {
     streamline: 0.45,     // stabilizes stroke direction
     easing: (t: number) => Math.sin((t * Math.PI) / 2),
     start: {
-      taper: 4,
+      taper: isSlidingSegment ? 0 : 4,
       cap: true,
     },
     end: {
@@ -52,11 +136,32 @@ export function getHighlighterStrokeOptions(size: number): StrokeOptions {
   };
 }
 
-export function generateStrokeOutline(points: Point[], tool: 'pen' | 'highlighter', size: number): number[][] {
+export function generateStrokeOutline(
+  points: Point[],
+  tool: 'pen' | 'highlighter',
+  size: number,
+  isSlidingSegment = false
+): number[][] {
   if (points.length === 0) return [];
-  
-  const options = tool === 'pen' ? getPenStrokeOptions(size) : getHighlighterStrokeOptions(size);
+
+  const options =
+    tool === 'pen'
+      ? getPenStrokeOptions(size, isSlidingSegment)
+      : getHighlighterStrokeOptions(size);
   return getStroke(points, options);
+}
+
+/**
+ * Get cached polygon outline for a committed stroke so Layer 2 redraws never recompute `getStroke()`
+ */
+export function getCachedStrokeOutline(stroke: Stroke): number[][] {
+  let outline = committedOutlineCache.get(stroke);
+  if (!outline) {
+    const pts = getStrokePoints(stroke);
+    outline = generateStrokeOutline(pts, stroke.tool, stroke.size);
+    committedOutlineCache.set(stroke, outline);
+  }
+  return outline;
 }
 
 export function drawOutline(
@@ -114,21 +219,22 @@ export function isStrokeIntersectingPoint(
   targetY: number,
   radius: number
 ): boolean {
-  if (stroke.points.length === 0) return false;
+  const pts = getStrokePoints(stroke);
+  if (pts.length === 0) return false;
 
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
   let maxY = -Infinity;
 
-  for (const pt of stroke.points) {
+  for (const pt of pts) {
     if (pt[0] < minX) minX = pt[0];
     if (pt[0] > maxX) maxX = pt[0];
     if (pt[1] < minY) minY = pt[1];
     if (pt[1] > maxY) maxY = pt[1];
   }
 
-  const effectiveRadius = radius + (stroke.size / 2);
+  const effectiveRadius = radius + stroke.size / 2;
   if (
     targetX < minX - effectiveRadius ||
     targetX > maxX + effectiveRadius ||
@@ -139,8 +245,8 @@ export function isStrokeIntersectingPoint(
   }
 
   const r2 = effectiveRadius * effectiveRadius;
-  for (let i = 0; i < stroke.points.length; i++) {
-    const p1 = stroke.points[i];
+  for (let i = 0; i < pts.length; i++) {
+    const p1 = pts[i];
     const dx = p1[0] - targetX;
     const dy = p1[1] - targetY;
     if (dx * dx + dy * dy <= r2) {
@@ -148,7 +254,7 @@ export function isStrokeIntersectingPoint(
     }
 
     if (i > 0) {
-      const p0 = stroke.points[i - 1];
+      const p0 = pts[i - 1];
       if (distToSegmentSquared(targetX, targetY, p0[0], p0[1], p1[0], p1[1]) <= r2) {
         return true;
       }
@@ -159,9 +265,12 @@ export function isStrokeIntersectingPoint(
 }
 
 function distToSegmentSquared(
-  px: number, py: number,
-  x1: number, y1: number,
-  x2: number, y2: number
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
 ): number {
   const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
   if (l2 === 0) return (px - x1) * (px - x1) + (py - y1) * (py - y1);

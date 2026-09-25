@@ -13,6 +13,8 @@ export interface Stroke {
   size: number;
   opacity: number;
   points: Point[];
+  /** Compact typed buffer [x0, y0, p0, x1, y1, p1, ...] for low-memory storage (C2) */
+  flatPoints?: Float32Array | number[];
   pathData?: string;
   createdAt: number;
 }

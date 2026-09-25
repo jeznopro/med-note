@@ -1,10 +1,21 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { Page, Stroke, Point, CanvasTransform } from '../../types/document';
 import type { ToolState } from '../../types/tools';
-import { generateStrokeOutline, drawOutline, isStrokeIntersectingPoint } from '../../engine/stroke';
+import {
+  generateStrokeOutline,
+  getCachedStrokeOutline,
+  createCompactStroke,
+  drawOutline,
+  isStrokeIntersectingPoint,
+} from '../../engine/stroke';
 import { renderPageBackground } from '../../engine/pageTemplate';
 import { PageHistory } from '../../engine/history';
-import { getPdfDocument, renderPdfPageToContext, cancelActiveRender } from '../../pdf/pdfLoader';
+import {
+  getPdfDocument,
+  renderPdfPageToContext,
+  cancelActiveRender,
+  cleanupPdfPage,
+} from '../../pdf/pdfLoader';
 import { Plus, Sparkles, ArrowRight } from 'lucide-react';
 
 interface NoteCanvasProps {
@@ -22,7 +33,12 @@ interface NoteCanvasProps {
   isPencilMode?: boolean;
 }
 
-export const NoteCanvas: React.FC<NoteCanvasProps> = ({
+// Sliding window constants for ultra-long strokes (B2)
+const SLIDING_WINDOW_THRESHOLD = 150;
+const SLIDING_WINDOW_TAIL = 75;
+const SLIDING_WINDOW_OVERLAP = 12;
+
+const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
   page,
   notebookId,
   pdfDataUrl,
@@ -38,24 +54,65 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
 }) => {
   const [showAutoPageToast, setShowAutoPageToast] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  // Only first 2 pages initialize active; subsequent pages wait for viewport intersection
   const [isInViewport, setIsInViewport] = useState(() => (page.pageNumber ?? 1) <= 2);
 
+  // A2: Keep canvas references and renderTasks in useRef Maps, never in React state
+  const renderTasksRef = useRef(new Map<number, { cancel: () => void }>());
+  const canvasRefs = useRef(new Map<number, HTMLCanvasElement>());
+
+  // B1: 3 Distinct Canvas Layers
+  // Layer 1 (Bottom): PDF & Page Template background
   const bgCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Layer 2 (Middle): Committed strokes (only redraws on stroke add/remove)
   const inkCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Layer 3 (Top): Live active stroke (redraws via RAF during pen movement, clears immediately on pointerup)
   const draftCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Offscreen baked buffer for sliding-window long strokes on Layer 3 (B2)
+  const bakedLiveCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const bakedPointCountRef = useRef<number>(0);
+
   const cursorDotRef = useRef<HTMLDivElement | null>(null);
 
   const isDrawingRef = useRef(false);
   const isFingerPanningRef = useRef(false);
   const currentPointsRef = useRef<Point[]>([]);
+  // B2: RAF batching queue for coalesced high-frequency stylus events (120Hz-240Hz)
+  const pendingPointsRef = useRef<Point[]>([]);
+  const rafIdRef = useRef<number | null>(null);
+
+  // B1: Track incremental stroke commit on Layer 2 so we don't redraw all historical strokes on pen lift
+  const lastIncrementalStrokeIdRef = useRef<string | null>(null);
+  const prevStrokesCountRef = useRef<number>(0);
+
+  // B3: Practical hardware palm rejection state (pen active + 500ms cooldown after pen lift)
+  const palmRejectionActiveRef = useRef<boolean>(false);
+  const palmRejectionTimeoutRef = useRef<number | null>(null);
+
   const erasedStrokesInSessionRef = useRef<Stroke[]>([]);
   const panStartRef = useRef<{ clientX: number; clientY: number; scrollLeft: number; scrollTop: number } | null>(null);
 
   const { width, height, template, strokes, pdfPageNumber } = page;
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  // A4: Cap DPI to max 2.0 (or 1.5 on mobile) to avoid excessive GPU texture allocation
+  const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
+  const dpr = Math.min(rawDpr, isMobileScreen ? 1.5 : 2.0);
 
-  // Viewport intersection observer with generous threshold for pre-rendering
+  // Register bgCanvas into canvasRefs Map (A2)
+  const setBgCanvasRef = useCallback(
+    (el: HTMLCanvasElement | null) => {
+      bgCanvasRef.current = el;
+      const pNum = pdfPageNumber || page.pageNumber;
+      if (el) {
+        canvasRefs.current.set(pNum, el);
+      } else {
+        canvasRefs.current.delete(pNum);
+      }
+    },
+    [pdfPageNumber, page.pageNumber]
+  );
+
+  // Viewport intersection observer
   useEffect(() => {
     const el = containerRef.current;
     if (!el || typeof IntersectionObserver === 'undefined') return;
@@ -72,7 +129,27 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // 1. Redraw Background Layer (PDF Page OR Template lines/grid/dots)
+  // A4/A5: Cleanup pdf.js render tasks, page memory, and pending RAF/timeouts on unmount or page change
+  useEffect(() => {
+    const currentRenderTasks = renderTasksRef.current;
+    return () => {
+      if (pdfPageNumber) {
+        currentRenderTasks.get(pdfPageNumber)?.cancel();
+        currentRenderTasks.delete(pdfPageNumber);
+        cleanupPdfPage(notebookId, pdfPageNumber);
+      }
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      if (palmRejectionTimeoutRef.current !== null) {
+        window.clearTimeout(palmRejectionTimeoutRef.current);
+        palmRejectionTimeoutRef.current = null;
+      }
+    };
+  }, [pdfPageNumber, notebookId]);
+
+  // Layer 1: Redraw Background Layer (PDF Page OR Template lines/grid/dots)
   const redrawBackground = useCallback(async () => {
     if (!isInViewport) return;
     const canvas = bgCanvasRef.current;
@@ -81,7 +158,18 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     if (pdfPageNumber && (pdfDataUrl || notebookId)) {
       try {
         const pdfDoc = await getPdfDocument(pdfDataUrl || '', notebookId);
-        await renderPdfPageToContext(pdfDoc, pdfPageNumber, canvas, width, height, dpr, notebookId);
+        await renderPdfPageToContext(
+          pdfDoc,
+          pdfPageNumber,
+          canvas,
+          width,
+          height,
+          dpr,
+          notebookId,
+          (task) => {
+            renderTasksRef.current.set(pdfPageNumber, task);
+          }
+        );
       } catch (err) {
         console.error('Failed to render PDF page on canvas:', err);
         const ctx = canvas.getContext('2d');
@@ -90,7 +178,6 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.scale(dpr, dpr);
-          // Always fill clean white paper for PDF documents to prevent pitch-black screen
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, width, height);
 
@@ -122,39 +209,57 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     }
   }, [width, height, template, isDarkMode, dpr, pdfDataUrl, pdfPageNumber, notebookId, isInViewport]);
 
-  // 2. Redraw Committed Ink Layer (Highlighters then Pens)
-  const redrawInk = useCallback(() => {
-    if (!isInViewport) return;
-    const canvas = inkCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  // Layer 2: Redraw Committed Ink Layer (Highlighters then Pens)
+  const redrawInk = useCallback(
+    (forceFullRedraw = false) => {
+      if (!isInViewport) return;
+      const canvas = inkCanvasRef.current;
+      if (!canvas) return;
 
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.scale(dpr, dpr);
-
-    // Pass 1: Highlighters (drawn underneath pen strokes with multiply blend)
-    for (const stroke of strokes) {
-      if (stroke.tool === 'highlighter') {
-        const outline = generateStrokeOutline(stroke.points, 'highlighter', stroke.size);
-        drawOutline(ctx, outline, stroke.color, stroke.opacity, true);
+      // B1 Optimization: If the only change to `strokes` is the single pen stroke we JUST drew incrementally onto Layer 2,
+      // skip clearing and redrawing the entire history of strokes!
+      if (
+        !forceFullRedraw &&
+        strokes.length === prevStrokesCountRef.current + 1 &&
+        strokes.length > 0 &&
+        strokes[strokes.length - 1].id === lastIncrementalStrokeIdRef.current &&
+        strokes[strokes.length - 1].tool === 'pen'
+      ) {
+        prevStrokesCountRef.current = strokes.length;
+        return;
       }
-    }
 
-    // Pass 2: Pen strokes (opaque vector lines with pressure sensitivity)
-    for (const stroke of strokes) {
-      if (stroke.tool === 'pen') {
-        const outline = generateStrokeOutline(stroke.points, 'pen', stroke.size);
-        drawOutline(ctx, outline, stroke.color, stroke.opacity, false);
+      prevStrokesCountRef.current = strokes.length;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(dpr, dpr);
+
+      // Pass 1: Highlighters (drawn underneath pen strokes with multiply blend, using WeakMap cached outlines)
+      for (const stroke of strokes) {
+        if (stroke.tool === 'highlighter') {
+          const outline = getCachedStrokeOutline(stroke);
+          drawOutline(ctx, outline, stroke.color, stroke.opacity, true);
+        }
       }
-    }
 
-    ctx.restore();
-  }, [strokes, width, height, dpr, isInViewport]);
+      // Pass 2: Pen strokes (opaque vector lines with pressure sensitivity, using WeakMap cached outlines)
+      for (const stroke of strokes) {
+        if (stroke.tool === 'pen') {
+          const outline = getCachedStrokeOutline(stroke);
+          drawOutline(ctx, outline, stroke.color, stroke.opacity, false);
+        }
+      }
 
-  // Handle render cancellation when moving out of viewport, or re-render when entering
+      ctx.restore();
+    },
+    [strokes, dpr, isInViewport]
+  );
+
+  // Trigger Layer 1 when background dependencies change
   useEffect(() => {
     if (!isInViewport) {
       if (bgCanvasRef.current) {
@@ -162,9 +267,15 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
       }
     } else {
       redrawBackground();
+    }
+  }, [isInViewport, redrawBackground]);
+
+  // Trigger Layer 2 when committed strokes or viewport visibility change
+  useEffect(() => {
+    if (isInViewport) {
       redrawInk();
     }
-  }, [isInViewport, redrawBackground, redrawInk]);
+  }, [isInViewport, redrawInk]);
 
   // Transform client coordinates to page canvas space
   const getCanvasPointFromEvent = useCallback(
@@ -199,24 +310,124 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
   );
 
   // Update position of the custom circular pen dot cursor
-  const updateCursorDotPosition = useCallback((x: number, y: number, pointerType?: string) => {
-    if (cursorDotRef.current) {
-      if (toolState.currentTool === 'pan' || isFingerPanningRef.current || (isPencilMode && pointerType === 'touch')) {
-        cursorDotRef.current.style.display = 'none';
-      } else {
-        cursorDotRef.current.style.display = 'block';
-        cursorDotRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+  const updateCursorDotPosition = useCallback(
+    (x: number, y: number, pointerType?: string) => {
+      if (cursorDotRef.current) {
+        if (
+          toolState.currentTool === 'pan' ||
+          isFingerPanningRef.current ||
+          (pointerType === 'touch' && (isPencilMode || palmRejectionActiveRef.current))
+        ) {
+          cursorDotRef.current.style.display = 'none';
+        } else {
+          cursorDotRef.current.style.display = 'block';
+          cursorDotRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        }
+      }
+    },
+    [toolState.currentTool, isPencilMode]
+  );
+
+  // B2: Flush pending coalesced points and render live stroke on Layer 3 inside requestAnimationFrame
+  const flushLiveStroke = useCallback(() => {
+    rafIdRef.current = null;
+
+    if (pendingPointsRef.current.length > 0) {
+      currentPointsRef.current.push(...pendingPointsRef.current);
+      pendingPointsRef.current = [];
+    }
+
+    const canvas = draftCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const points = currentPointsRef.current;
+    if (points.length === 0 || toolState.currentTool === 'eraser' || toolState.currentTool === 'pan') {
+      return;
+    }
+
+    const tool = toolState.currentTool === 'highlighter' ? 'highlighter' : 'pen';
+    const size = tool === 'highlighter' ? toolState.highlighter.size : toolState.pen.size;
+    const color = tool === 'highlighter' ? toolState.highlighter.color : toolState.pen.color;
+    const opacity = tool === 'highlighter' ? toolState.highlighter.opacity : 1;
+
+    // B2 Sliding Window Optimization:
+    // For very long continuous pen strokes (> 150 points), bake stabilized earlier segments into an offscreen buffer
+    // and only run `perfect-freehand` `getStroke()` on the recent sliding window tail!
+    if (tool === 'pen' && points.length - bakedPointCountRef.current > SLIDING_WINDOW_THRESHOLD) {
+      if (!bakedLiveCanvasRef.current) {
+        const off = document.createElement('canvas');
+        off.width = canvas.width;
+        off.height = canvas.height;
+        bakedLiveCanvasRef.current = off;
+      }
+      const bakedCanvas = bakedLiveCanvasRef.current;
+      if (bakedCanvas.width !== canvas.width || bakedCanvas.height !== canvas.height) {
+        bakedCanvas.width = canvas.width;
+        bakedCanvas.height = canvas.height;
+      }
+      const bakedCtx = bakedCanvas.getContext('2d');
+      if (bakedCtx) {
+        const freezeEnd = points.length - SLIDING_WINDOW_TAIL;
+        const segmentStart = Math.max(0, bakedPointCountRef.current - SLIDING_WINDOW_OVERLAP);
+        const segmentPoints = points.slice(segmentStart, freezeEnd + SLIDING_WINDOW_OVERLAP);
+        const segOutline = generateStrokeOutline(segmentPoints, 'pen', size, segmentStart > 0);
+
+        bakedCtx.save();
+        bakedCtx.setTransform(1, 0, 0, 1, 0, 0);
+        bakedCtx.scale(dpr, dpr);
+        drawOutline(bakedCtx, segOutline, color, opacity, false);
+        bakedCtx.restore();
+
+        bakedPointCountRef.current = freezeEnd;
       }
     }
-  }, [toolState.currentTool, isPencilMode]);
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (tool === 'pen' && bakedPointCountRef.current > 0 && bakedLiveCanvasRef.current) {
+      // Draw already-stabilized prefix from offscreen baked canvas
+      ctx.drawImage(bakedLiveCanvasRef.current, 0, 0);
+      // Compute perfect-freehand outline ONLY for the active sliding window tail
+      const tailStart = Math.max(0, bakedPointCountRef.current - SLIDING_WINDOW_OVERLAP);
+      const tailPoints = points.slice(tailStart);
+      ctx.scale(dpr, dpr);
+      const tailOutline = generateStrokeOutline(tailPoints, 'pen', size, true);
+      drawOutline(ctx, tailOutline, color, opacity, false);
+    } else {
+      ctx.scale(dpr, dpr);
+      const outline = generateStrokeOutline(points, tool, size);
+      drawOutline(ctx, outline, color, opacity, tool === 'highlighter');
+    }
+
+    ctx.restore();
+  }, [dpr, toolState]);
 
   // Pointer Down (Start stroke, erase, or pan drag-scroll)
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
 
+    const isPenInput = e.pointerType === 'pen';
     const isFinger = e.pointerType === 'touch';
 
-    // 1. Apple Pencil mode: Finger automatically scrolls the document (Palm Rejection)
+    // B3: Activate hardware Palm Rejection lock immediately when pen touches/approaches screen
+    if (isPenInput) {
+      palmRejectionActiveRef.current = true;
+      if (palmRejectionTimeoutRef.current !== null) {
+        window.clearTimeout(palmRejectionTimeoutRef.current);
+        palmRejectionTimeoutRef.current = null;
+      }
+    }
+
+    // B3: Ignore any touch event while pen is active or within the 500ms palm-rejection cooldown window
+    if (isFinger && palmRejectionActiveRef.current) {
+      return;
+    }
+
+    // 1. Apple Pencil Discrimination Mode: Finger scrolls the document while Stylus writes
     if (isPencilMode && isFinger) {
       const scrollEl = document.getElementById('editor-main-container');
       if (scrollEl) {
@@ -252,7 +463,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
       return;
     }
 
-    // 3. Drawing / Writing with Apple Pencil, Mouse, or finger (when Pencil Mode is disabled)
+    // 3. Drawing / Writing on Layer 3 (Live Stroke Canvas)
     e.preventDefault();
 
     const canvas = draftCanvasRef.current;
@@ -269,7 +480,15 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
       eraseAtPoint(pt[0], pt[1]);
     } else {
       currentPointsRef.current = [pt];
-      renderDraftStroke();
+      pendingPointsRef.current = [];
+      bakedPointCountRef.current = 0;
+      if (bakedLiveCanvasRef.current) {
+        const bCtx = bakedLiveCanvasRef.current.getContext('2d');
+        bCtx?.clearRect(0, 0, bakedLiveCanvasRef.current.width, bakedLiveCanvasRef.current.height);
+      }
+      if (!rafIdRef.current) {
+        rafIdRef.current = requestAnimationFrame(flushLiveStroke);
+      }
     }
   };
 
@@ -289,6 +508,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
 
     if (newlyErased.length > 0) {
       erasedStrokesInSessionRef.current.push(...newlyErased);
+      lastIncrementalStrokeIdRef.current = null;
       onPageChange({
         ...page,
         strokes: remainingStrokes,
@@ -296,34 +516,21 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     }
   };
 
-  // Render the in-progress stroke on the Draft Canvas (ultra low-latency)
-  const renderDraftStroke = () => {
-    const canvas = draftCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.scale(dpr, dpr);
-
-    const points = currentPointsRef.current;
-    if (points.length > 0 && toolState.currentTool !== 'eraser' && toolState.currentTool !== 'pan') {
-      const tool = toolState.currentTool === 'highlighter' ? 'highlighter' : 'pen';
-      const size = tool === 'highlighter' ? toolState.highlighter.size : toolState.pen.size;
-      const color = tool === 'highlighter' ? toolState.highlighter.color : toolState.pen.color;
-      const opacity = tool === 'highlighter' ? toolState.highlighter.opacity : 1;
-
-      const outline = generateStrokeOutline(points, tool, size);
-      drawOutline(ctx, outline, color, opacity, tool === 'highlighter');
+  // B2 & B3: Pointer Move (Batch coalesced events via RAF + Palm Rejection)
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'pen') {
+      palmRejectionActiveRef.current = true;
+      if (palmRejectionTimeoutRef.current !== null) {
+        window.clearTimeout(palmRejectionTimeoutRef.current);
+        palmRejectionTimeoutRef.current = null;
+      }
     }
 
-    ctx.restore();
-  };
+    // B3: Reject palm touch events while pen is active or in cooldown
+    if (e.pointerType === 'touch' && palmRejectionActiveRef.current) {
+      return;
+    }
 
-  // Pointer Move (Collect coalesced events for 120Hz-240Hz styluses + update cursor dot + Pan drag)
-  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const pt = getCanvasPoint(e);
     updateCursorDotPosition(pt[0], pt[1], e.pointerType);
 
@@ -349,31 +556,58 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
       return;
     }
 
+    // B2: Collect high-frequency coalesced events (120Hz/240Hz Apple Pencil) and schedule single RAF flush
     const nativeEv = e.nativeEvent as unknown as { getCoalescedEvents?: () => PointerEvent[] };
-    const coalesced = typeof nativeEv.getCoalescedEvents === 'function'
-      ? nativeEv.getCoalescedEvents()
-      : [e.nativeEvent as PointerEvent];
+    const events =
+      typeof nativeEv.getCoalescedEvents === 'function'
+        ? nativeEv.getCoalescedEvents()
+        : [e.nativeEvent as PointerEvent];
 
-    for (const ev of coalesced) {
-      const subPt = getCanvasPointFromEvent(ev.clientX, ev.clientY, ev.pressure, ev.pointerType);
-      currentPointsRef.current.push(subPt);
+    for (const ev of events) {
+      pendingPointsRef.current.push(
+        getCanvasPointFromEvent(ev.clientX, ev.clientY, ev.pressure, ev.pointerType)
+      );
     }
 
-    renderDraftStroke();
+    if (!rafIdRef.current) {
+      rafIdRef.current = requestAnimationFrame(flushLiveStroke);
+    }
   };
 
-  // Pointer Up (Commit stroke or end pan)
+  // B1, B3, C2: Pointer Up (Commit final path to Layer 2 once, clear Layer 3 immediately, set 500ms palm rejection cooldown)
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // B3: Keep palm rejection active for 500ms after pen lifts so resting palm doesn't trigger accidental touch
+    if (e.pointerType === 'pen') {
+      if (palmRejectionTimeoutRef.current !== null) {
+        window.clearTimeout(palmRejectionTimeoutRef.current);
+      }
+      palmRejectionTimeoutRef.current = window.setTimeout(() => {
+        palmRejectionActiveRef.current = false;
+        palmRejectionTimeoutRef.current = null;
+      }, 500);
+    }
+
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
+
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+
+    // Drain any remaining pending points
+    if (pendingPointsRef.current.length > 0) {
+      currentPointsRef.current.push(...pendingPointsRef.current);
+      pendingPointsRef.current = [];
+    }
 
     const wasFingerPanning = isFingerPanningRef.current;
     isFingerPanningRef.current = false;
     panStartRef.current = null;
 
-    const canvas = draftCanvasRef.current;
-    if (canvas && canvas.hasPointerCapture(e.pointerId)) {
-      canvas.releasePointerCapture(e.pointerId);
+    const draftCanvas = draftCanvasRef.current;
+    if (draftCanvas && draftCanvas.hasPointerCapture(e.pointerId)) {
+      draftCanvas.releasePointerCapture(e.pointerId);
     }
 
     if (wasFingerPanning || toolState.currentTool === 'pan') return;
@@ -392,30 +626,58 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
 
     const points = [...currentPointsRef.current];
     currentPointsRef.current = [];
+    bakedPointCountRef.current = 0;
 
-    // Clear draft canvas
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.restore();
+    if (points.length < 2) {
+      // Clear Layer 3
+      if (draftCanvas) {
+        const dCtx = draftCanvas.getContext('2d');
+        dCtx?.clearRect(0, 0, draftCanvas.width, draftCanvas.height);
       }
+      return;
     }
 
-    if (points.length < 2) return;
-
     const isHighlighter = toolState.currentTool === 'highlighter';
-    const newStroke: Stroke = {
-      id: `stroke_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      tool: isHighlighter ? 'highlighter' : 'pen',
-      color: isHighlighter ? toolState.highlighter.color : toolState.pen.color,
-      size: isHighlighter ? toolState.highlighter.size : toolState.pen.size,
-      opacity: isHighlighter ? toolState.highlighter.opacity : 1,
-      points,
-      createdAt: Date.now(),
-    };
+    const strokeId = `stroke_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    // C2: Create memory-compact stroke (Float32Array + flat numeric buffer)
+    const newStroke = createCompactStroke(
+      strokeId,
+      isHighlighter ? 'highlighter' : 'pen',
+      isHighlighter ? toolState.highlighter.color : toolState.pen.color,
+      isHighlighter ? toolState.highlighter.size : toolState.pen.size,
+      isHighlighter ? toolState.highlighter.opacity : 1,
+      points
+    );
+
+    // B1: Pre-compute & cache outline in WeakMap, draw once directly onto Layer 2 (Committed Strokes Canvas),
+    // and immediately clearRect Layer 3 (Live Stroke Canvas) in the exact same frame!
+    const finalOutline = getCachedStrokeOutline(newStroke);
+    const inkCanvas = inkCanvasRef.current;
+    if (inkCanvas && !isHighlighter) {
+      const inkCtx = inkCanvas.getContext('2d');
+      if (inkCtx) {
+        inkCtx.save();
+        inkCtx.setTransform(1, 0, 0, 1, 0, 0);
+        inkCtx.scale(dpr, dpr);
+        drawOutline(inkCtx, finalOutline, newStroke.color, newStroke.opacity, false);
+        inkCtx.restore();
+        lastIncrementalStrokeIdRef.current = newStroke.id;
+      }
+    } else {
+      lastIncrementalStrokeIdRef.current = null;
+    }
+
+    // Clear Layer 3 (Live Stroke Canvas) immediately after Layer 2 commit
+    if (draftCanvas) {
+      const dCtx = draftCanvas.getContext('2d');
+      if (dCtx) {
+        dCtx.save();
+        dCtx.setTransform(1, 0, 0, 1, 0, 0);
+        dCtx.clearRect(0, 0, draftCanvas.width, draftCanvas.height);
+        dCtx.restore();
+      }
+    }
 
     history.push({
       type: 'ADD_STROKE',
@@ -494,6 +756,8 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
 
   const scaledWidth = Math.round(width * transform.scale);
   const scaledHeight = Math.round(height * transform.scale);
+  const pixelWidth = Math.round(width * dpr);
+  const pixelHeight = Math.round(height * dpr);
 
   return (
     <div
@@ -536,23 +800,23 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
               touchAction: toolState.currentTool === 'pan' ? 'pan-x pan-y' : 'none',
             }}
           >
-            {/* Layer 1: Background Canvas (PDF Page or Template lines, grid, dots) */}
+            {/* Layer 1 (Bottom): PDF & Page Template Canvas — only redraws on page/zoom/template change */}
             <canvas
-              ref={bgCanvasRef}
-              width={width * dpr}
-              height={height * dpr}
+              ref={setBgCanvasRef}
+              width={pixelWidth}
+              height={pixelHeight}
               className="absolute inset-0 w-full h-full pointer-events-none rounded-xs"
             />
 
-            {/* Layer 2: Ink Canvas (Committed Strokes) */}
+            {/* Layer 2 (Middle): Committed Strokes Canvas — only redraws when strokes are added/removed */}
             <canvas
               ref={inkCanvasRef}
-              width={width * dpr}
-              height={height * dpr}
+              width={pixelWidth}
+              height={pixelHeight}
               className="absolute inset-0 w-full h-full pointer-events-none rounded-xs"
             />
 
-            {/* Dynamic Pen Tip Dot Cursor (Same color & size as active pen) */}
+            {/* Dynamic Pen Tip Dot Cursor */}
             {toolState.currentTool !== 'pan' && (
               <div
                 ref={cursorDotRef}
@@ -572,11 +836,11 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
               />
             )}
 
-            {/* Layer 3: Draft / Interactive Canvas (Pointer events & active stroke) */}
+            {/* Layer 3 (Top): Live Stroke Canvas — redraws via RAF while drawing, clears immediately on pen lift */}
             <canvas
               ref={draftCanvasRef}
-              width={width * dpr}
-              height={height * dpr}
+              width={pixelWidth}
+              height={pixelHeight}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
@@ -636,3 +900,32 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     </div>
   );
 };
+
+// A3: React.memo with custom comparator comparing pageNum/strokes + scale + relevant tool state
+// Prevents re-rendering PageCanvas when unrelated parent state (sidebar open, sync status, active page indicator) changes
+export const NoteCanvas = React.memo(NoteCanvasComponent, (prev, next) => {
+  return (
+    prev.page.id === next.page.id &&
+    prev.page.pageNumber === next.page.pageNumber &&
+    prev.page.pdfPageNumber === next.page.pdfPageNumber &&
+    prev.page.width === next.page.width &&
+    prev.page.height === next.page.height &&
+    prev.page.template === next.page.template &&
+    prev.page.strokes === next.page.strokes &&
+    prev.transform.scale === next.transform.scale &&
+    prev.transform.offsetX === next.transform.offsetX &&
+    prev.transform.offsetY === next.transform.offsetY &&
+    prev.isDarkMode === next.isDarkMode &&
+    prev.isPencilMode === next.isPencilMode &&
+    prev.isLastPage === next.isLastPage &&
+    prev.notebookId === next.notebookId &&
+    prev.pdfDataUrl === next.pdfDataUrl &&
+    prev.toolState.currentTool === next.toolState.currentTool &&
+    prev.toolState.pen.color === next.toolState.pen.color &&
+    prev.toolState.pen.size === next.toolState.pen.size &&
+    prev.toolState.highlighter.color === next.toolState.highlighter.color &&
+    prev.toolState.highlighter.size === next.toolState.highlighter.size &&
+    prev.toolState.highlighter.opacity === next.toolState.highlighter.opacity &&
+    prev.toolState.eraser.size === next.toolState.eraser.size
+  );
+});

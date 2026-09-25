@@ -1,6 +1,5 @@
-import { jsPDF } from 'jspdf';
 import type { Notebook, Page } from '../types/document';
-import { generateStrokeOutline, drawOutline } from '../engine/stroke';
+import { getCachedStrokeOutline, drawOutline } from '../engine/stroke';
 import { renderPageBackground } from '../engine/pageTemplate';
 import { getPdfDocument, renderPdfPageToContext } from './pdfLoader';
 import { getPdfBinary } from '../services/pdfStorage';
@@ -22,7 +21,7 @@ export async function renderFullPageToCanvas(
   if (page.pdfPageNumber) {
     try {
       const pdfDoc = await getPdfDocument(pdfDataUrl || '', notebookId);
-      await renderPdfPageToContext(pdfDoc, page.pdfPageNumber, canvas, page.width, page.height, dpr);
+      await renderPdfPageToContext(pdfDoc, page.pdfPageNumber, canvas, page.width, page.height, dpr, notebookId);
     } catch (err) {
       console.warn('Failed to load PDF page background:', err);
       ctx.save();
@@ -43,7 +42,7 @@ export async function renderFullPageToCanvas(
   // 2. Render Highlighters
   for (const stroke of page.strokes) {
     if (stroke.tool === 'highlighter') {
-      const outline = generateStrokeOutline(stroke.points, 'highlighter', stroke.size);
+      const outline = getCachedStrokeOutline(stroke);
       drawOutline(ctx, outline, stroke.color, stroke.opacity, true);
     }
   }
@@ -51,7 +50,7 @@ export async function renderFullPageToCanvas(
   // 3. Render Pen strokes
   for (const stroke of page.strokes) {
     if (stroke.tool === 'pen') {
-      const outline = generateStrokeOutline(stroke.points, 'pen', stroke.size);
+      const outline = getCachedStrokeOutline(stroke);
       drawOutline(ctx, outline, stroke.color, stroke.opacity, false);
     }
   }
@@ -86,7 +85,6 @@ export async function generateNotebookPdfBlob(
   }
 
   // 1. Instant pristine PDF export for imported PDFs with no handwritten strokes:
-  // If the user hasn't written any strokes, return the exact original PDF from IndexedDB in 0ms!
   const hasStrokes = notebook.pages.some((p) => p.strokes && p.strokes.length > 0);
   if (!hasStrokes) {
     try {
@@ -99,7 +97,9 @@ export async function generateNotebookPdfBlob(
     }
   }
 
-  // 2. High-quality vector + canvas composition for drawn notes or custom templates
+  // D1: Dynamic import jsPDF ONLY when user actually exports a PDF
+  const { jsPDF } = await import('jspdf');
+
   const firstPage = notebook.pages[0];
   const orientation = firstPage.width > firstPage.height ? 'landscape' : 'portrait';
 

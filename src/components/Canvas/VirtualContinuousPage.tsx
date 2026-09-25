@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Page, CanvasTransform } from '../../types/document';
 import type { ToolState } from '../../types/tools';
 import type { PageHistory } from '../../engine/history';
@@ -24,7 +25,7 @@ interface VirtualContinuousPageProps {
   isPencilMode?: boolean;
 }
 
-export const VirtualContinuousPage: React.FC<VirtualContinuousPageProps> = ({
+const VirtualContinuousPageComponent: React.FC<VirtualContinuousPageProps> = ({
   page,
   index,
   total,
@@ -45,14 +46,12 @@ export const VirtualContinuousPage: React.FC<VirtualContinuousPageProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Initialize: First 2 pages or currently active page are mounted immediately.
-  // Subsequent pages wait until scrolled near the viewport.
   const [isNearViewport, setIsNearViewport] = useState(() => index <= 1 || isActive);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el || typeof IntersectionObserver === 'undefined') return;
 
-    // Generous vertical rootMargin (1000px) pre-renders ~1 page before it scrolls into the viewport
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
@@ -65,7 +64,6 @@ export const VirtualContinuousPage: React.FC<VirtualContinuousPageProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // Total pages <= 3 will render all pages directly
   const shouldRenderCanvas = isNearViewport || isActive || total <= 3;
   const zoom = transform.scale || 1;
   const scaledWidth = Math.round(page.width * zoom);
@@ -144,6 +142,158 @@ export const VirtualContinuousPage: React.FC<VirtualContinuousPageProps> = ({
           </button>
         </div>
       )}
+    </div>
+  );
+};
+
+// A3: Memoize individual VirtualContinuousPage by page reference, scale, and tool state
+export const VirtualContinuousPage = React.memo(VirtualContinuousPageComponent, (prev, next) => {
+  return (
+    prev.page === next.page &&
+    prev.index === next.index &&
+    prev.total === next.total &&
+    prev.isActive === next.isActive &&
+    prev.isLastPage === next.isLastPage &&
+    prev.notebookId === next.notebookId &&
+    prev.pdfDataUrl === next.pdfDataUrl &&
+    prev.transform.scale === next.transform.scale &&
+    prev.transform.offsetX === next.transform.offsetX &&
+    prev.transform.offsetY === next.transform.offsetY &&
+    prev.isDarkMode === next.isDarkMode &&
+    prev.isPencilMode === next.isPencilMode &&
+    prev.toolState === next.toolState
+  );
+});
+
+// A2: Virtualized Continuous Page List powered by @tanstack/react-virtual
+interface VirtualizedPageListProps {
+  pages: Page[];
+  currentPageIndex: number;
+  notebookId: string;
+  pdfDataUrl?: string;
+  toolState: ToolState;
+  transform: CanvasTransform;
+  isDarkMode: boolean;
+  getPageHistory: (pageId: string) => PageHistory;
+  onSpecificPageChange: (index: number, updatedPage: Page) => void;
+  onHistoryChange: () => void;
+  onAutoAddNewPage: (navigateNow?: boolean) => void;
+  onSelectPage: (index: number) => void;
+  isPencilMode: boolean;
+}
+
+export const VirtualizedPageList: React.FC<VirtualizedPageListProps> = ({
+  pages,
+  currentPageIndex,
+  notebookId,
+  pdfDataUrl,
+  toolState,
+  transform,
+  isDarkMode,
+  getPageHistory,
+  onSpecificPageChange,
+  onHistoryChange,
+  onAutoAddNewPage,
+  onSelectPage,
+  isPencilMode,
+}) => {
+  const zoom = transform.scale || 1;
+  const GAP_PX = 32;
+
+  // For notebooks with > 15 pages, use @tanstack/react-virtual windowing so DOM never bloats
+  const useWindowVirtualizer = pages.length > 15;
+
+  const rowVirtualizer = useVirtualizer({
+    count: pages.length,
+    getScrollElement: () => document.getElementById('editor-main-container'),
+    estimateSize: (index) => {
+      const p = pages[index];
+      const h = p ? Math.round(p.height * zoom) : Math.round(1160 * zoom);
+      const isLast = index === pages.length - 1;
+      return h + 28 + GAP_PX + (isLast ? 110 : 0);
+    },
+    overscan: 2,
+    enabled: useWindowVirtualizer,
+  });
+
+  if (!useWindowVirtualizer) {
+    return (
+      <div className="w-fit min-w-full flex flex-col items-center gap-8 py-8 pb-36 min-h-full">
+        {pages.map((p, idx) => (
+          <VirtualContinuousPage
+            key={p.id}
+            page={p}
+            index={idx}
+            total={pages.length}
+            isActive={currentPageIndex === idx}
+            notebookId={notebookId}
+            pdfDataUrl={pdfDataUrl}
+            toolState={toolState}
+            transform={transform}
+            isDarkMode={isDarkMode}
+            history={getPageHistory(p.id)}
+            onPageChange={(updatedPage) => onSpecificPageChange(idx, updatedPage)}
+            onHistoryChange={onHistoryChange}
+            isLastPage={idx === pages.length - 1}
+            onAutoAddNewPage={onAutoAddNewPage}
+            isPencilMode={isPencilMode}
+            onSelectPage={onSelectPage}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const maxScaledWidth = pages.reduce((max, p) => Math.max(max, Math.round(p.width * zoom)), 820);
+
+  return (
+    <div
+      className="w-fit min-w-full flex flex-col items-center py-8 pb-36 relative"
+      style={{
+        height: `${rowVirtualizer.getTotalSize() + 140}px`,
+        minWidth: `${maxScaledWidth + 32}px`,
+      }}
+    >
+      {virtualItems.map((virtualRow) => {
+        const idx = virtualRow.index;
+        const p = pages[idx];
+        if (!p) return null;
+        return (
+          <div
+            key={p.id}
+            data-index={idx}
+            ref={rowVirtualizer.measureElement}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              transform: `translateY(${virtualRow.start + 32}px)`,
+            }}
+            className="flex flex-col items-center"
+          >
+            <VirtualContinuousPage
+              page={p}
+              index={idx}
+              total={pages.length}
+              isActive={currentPageIndex === idx}
+              notebookId={notebookId}
+              pdfDataUrl={pdfDataUrl}
+              toolState={toolState}
+              transform={transform}
+              isDarkMode={isDarkMode}
+              history={getPageHistory(p.id)}
+              onPageChange={(updatedPage) => onSpecificPageChange(idx, updatedPage)}
+              onHistoryChange={onHistoryChange}
+              isLastPage={idx === pages.length - 1}
+              onAutoAddNewPage={onAutoAddNewPage}
+              isPencilMode={isPencilMode}
+              onSelectPage={onSelectPage}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 };
