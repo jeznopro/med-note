@@ -312,7 +312,7 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
                       <div className="text-[10px] text-zinc-400">Thư mục trên Drive của bạn</div>
                       <div className="font-semibold flex items-center gap-1 mt-0.5 text-blue-600 dark:text-blue-400 truncate">
                         <Folder className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">MedNotes_Backup</span>
+                        <span className="truncate">MedNotes_Backup / [Môn học]</span>
                       </div>
                     </div>
 
@@ -331,14 +331,14 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
                     className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors disabled:opacity-50 shadow-xs"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${syncInfo.status === 'syncing' ? 'animate-spin' : ''}`} />
-                    <span>{syncInfo.status === 'syncing' ? 'Đang đồng bộ PDF lên Google Drive...' : 'Đồng bộ & Xuất PDF lên Drive ngay'}</span>
+                    <span>{syncInfo.status === 'syncing' ? 'Đang đồng bộ PDF vào thư mục...' : 'Đồng bộ & Xuất PDF vào từng thư mục'}</span>
                   </button>
 
                   {/* Format indicator & Clean up old .json files button */}
                   <div className="pt-2 border-t border-inherit space-y-1.5">
                     <div className="flex items-center justify-between text-[11px] text-zinc-500">
-                      <span>Định dạng tải lên:</span>
-                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">File tài liệu PDF (.pdf)</span>
+                      <span>Cấu trúc lưu Drive:</span>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">Tự chia thư mục con + PDF chuẩn</span>
                     </div>
                     <button
                       type="button"

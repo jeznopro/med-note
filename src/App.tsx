@@ -335,7 +335,8 @@ export default function App() {
         } catch (pdfErr) {
           console.warn('Could not generate PDF blob for auto-sync', pdfErr);
         }
-        await gdrive.uploadNotebook(activeNotebook, cloudAccount, pdfBlob);
+        const folderName = activeNotebook.folderId ? folders.find((f) => f.id === activeNotebook.folderId)?.name : undefined;
+        await gdrive.uploadNotebook(activeNotebook, cloudAccount, pdfBlob, folderName);
         setSyncInfo({
           status: 'success',
           lastSyncTime: Date.now(),
@@ -354,7 +355,7 @@ export default function App() {
     return () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
-  }, [notebooks, cloudAccount, autoSyncEnabled, activeNotebook, gdrive, isDarkMode]);
+  }, [notebooks, folders, cloudAccount, autoSyncEnabled, activeNotebook, gdrive, isDarkMode]);
 
   // Google Drive Auth Handlers
   const handleSignInGoogle = async (
@@ -369,6 +370,7 @@ export default function App() {
       await gdrive.syncAllNotebooks(
         notebooks,
         acc,
+        folders,
         undefined,
         async (nb) => generateNotebookPdfBlob(nb, isDarkMode)
       );
@@ -404,6 +406,7 @@ export default function App() {
       await gdrive.syncAllNotebooks(
         notebooks,
         cloudAccount,
+        folders,
         undefined,
         async (nb) => generateNotebookPdfBlob(nb, isDarkMode)
       );

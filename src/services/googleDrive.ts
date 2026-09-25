@@ -222,11 +222,73 @@ export class GoogleDriveService {
     return folderData.id;
   }
 
-  // Backup single notebook to Google Drive (uploads rendered PDF and vector JSON)
+  // Cache of created subfolder IDs: "parentFolderId_subfolderName" -> subfolderId
+  private subfolderCache = new Map<string, string>();
+
+  // Find or create a subfolder inside a parent folder on Google Drive
+  public async getOrCreateSubfolder(
+    parentFolderId: string,
+    subfolderName: string,
+    accessToken: string
+  ): Promise<string> {
+    if (accessToken.startsWith('demo_token_')) {
+      return `demo_folder_${subfolderName}`;
+    }
+
+    const cleanName = subfolderName.replace(/[/\\?%*:|"<>]/g, '_').trim();
+    if (!cleanName) return parentFolderId;
+
+    const cacheKey = `${parentFolderId}_${cleanName}`;
+    if (this.subfolderCache.has(cacheKey)) {
+      return this.subfolderCache.get(cacheKey)!;
+    }
+
+    // 1. Search for existing subfolder inside parent
+    const q = `mimeType='application/vnd.google-apps.folder' and name='${cleanName}' and '${parentFolderId}' in parents and trashed=false`;
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`;
+
+    const searchRes = await fetch(searchUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (searchRes.ok) {
+      const data = await searchRes.json();
+      if (data.files && data.files.length > 0) {
+        const id = data.files[0].id;
+        this.subfolderCache.set(cacheKey, id);
+        return id;
+      }
+    }
+
+    // 2. Create subfolder inside parent
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: cleanName,
+        parents: [parentFolderId],
+        mimeType: 'application/vnd.google-apps.folder',
+      }),
+    });
+
+    if (createRes.ok) {
+      const folderData = await createRes.json();
+      this.subfolderCache.set(cacheKey, folderData.id);
+      return folderData.id;
+    }
+
+    return parentFolderId;
+  }
+
+  // Backup single notebook to Google Drive (uploads rendered PDF and vector JSON into corresponding subfolder)
   public async uploadNotebook(
     notebook: Notebook,
     account: CloudAccount,
-    pdfBlob?: Blob
+    pdfBlob?: Blob,
+    folderName?: string
   ): Promise<void> {
     if (account.accessToken.startsWith('demo_token_')) {
       // Simulate cloud latency
@@ -240,7 +302,7 @@ export class GoogleDriveService {
           title: notebook.title,
           updatedAt: Date.now(),
           pagesCount: notebook.pages.length,
-          folder: DEFAULT_FOLDER_NAME,
+          folder: folderName || DEFAULT_FOLDER_NAME,
           hasPdf: !!pdfBlob,
           data: notebook,
         };
@@ -251,14 +313,20 @@ export class GoogleDriveService {
       return;
     }
 
-    const folderId = await this.getOrCreateBackupFolder(account.accessToken);
+    const rootFolderId = await this.getOrCreateBackupFolder(account.accessToken);
+    let targetFolderId = rootFolderId;
+    if (folderName && folderName.trim()) {
+      targetFolderId = await this.getOrCreateSubfolder(rootFolderId, folderName.trim(), account.accessToken);
+    }
+
     const cleanTitle = notebook.title.replace(/[/\\?%*:|"<>]/g, '_').trim();
 
     // 1. Upload/Update Rendered PDF file (.pdf) for direct viewing on Google Drive & mobile
     if (pdfBlob) {
       try {
         const pdfFileName = `${cleanTitle}.pdf`;
-        const qPdf = `name='${pdfFileName}' and '${folderId}' in parents and trashed=false`;
+        // Search in target subfolder first
+        const qPdf = `name='${pdfFileName}' and '${targetFolderId}' in parents and trashed=false`;
         const pdfSearchRes = await fetch(
           `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qPdf)}&fields=files(id)`,
           { headers: { Authorization: `Bearer ${account.accessToken}` } }
@@ -272,7 +340,32 @@ export class GoogleDriveService {
           }
         }
 
-        // If file doesn't exist, create file metadata first (bulletproof 2-step Google Drive API upload)
+        // If not found in target subfolder, but target is a subfolder, check rootFolderId and move it!
+        if (!targetPdfId && targetFolderId !== rootFolderId) {
+          const qRoot = `name='${pdfFileName}' and '${rootFolderId}' in parents and trashed=false`;
+          const rootSearchRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qRoot)}&fields=files(id)`,
+            { headers: { Authorization: `Bearer ${account.accessToken}` } }
+          );
+          if (rootSearchRes.ok) {
+            const rootData = await rootSearchRes.json();
+            if (rootData.files && rootData.files.length > 0) {
+              const oldFileId = rootData.files[0].id;
+              const moveRes = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${oldFileId}?addParents=${targetFolderId}&removeParents=${rootFolderId}`,
+                {
+                  method: 'PATCH',
+                  headers: { Authorization: `Bearer ${account.accessToken}` },
+                }
+              );
+              if (moveRes.ok) {
+                targetPdfId = oldFileId;
+              }
+            }
+          }
+        }
+
+        // If file doesn't exist, create file metadata in targetFolderId
         if (!targetPdfId) {
           const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
             method: 'POST',
@@ -282,7 +375,7 @@ export class GoogleDriveService {
             },
             body: JSON.stringify({
               name: pdfFileName,
-              parents: [folderId],
+              parents: [targetFolderId],
               mimeType: 'application/pdf',
             }),
           });
@@ -319,7 +412,7 @@ export class GoogleDriveService {
     // 2. Upload/Update Vector JSON backup (.mednote.json for restoring vector edit layers)
     try {
       const jsonFileName = `${cleanTitle}.mednote.json`;
-      const q = `name='${jsonFileName}' and '${folderId}' in parents and trashed=false`;
+      const q = `name='${jsonFileName}' and '${targetFolderId}' in parents and trashed=false`;
       const searchRes = await fetch(
         `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
         { headers: { Authorization: `Bearer ${account.accessToken}` } }
@@ -333,6 +426,31 @@ export class GoogleDriveService {
         }
       }
 
+      // If not in target subfolder, check root and move if found
+      if (!targetJsonId && targetFolderId !== rootFolderId) {
+        const qRoot = `name='${jsonFileName}' and '${rootFolderId}' in parents and trashed=false`;
+        const rootSearchRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qRoot)}&fields=files(id)`,
+          { headers: { Authorization: `Bearer ${account.accessToken}` } }
+        );
+        if (rootSearchRes.ok) {
+          const rootData = await rootSearchRes.json();
+          if (rootData.files && rootData.files.length > 0) {
+            const oldFileId = rootData.files[0].id;
+            const moveRes = await fetch(
+              `https://www.googleapis.com/drive/v3/files/${oldFileId}?addParents=${targetFolderId}&removeParents=${rootFolderId}`,
+              {
+                method: 'PATCH',
+                headers: { Authorization: `Bearer ${account.accessToken}` },
+              }
+            );
+            if (moveRes.ok) {
+              targetJsonId = oldFileId;
+            }
+          }
+        }
+      }
+
       if (!targetJsonId) {
         const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
           method: 'POST',
@@ -342,7 +460,7 @@ export class GoogleDriveService {
           },
           body: JSON.stringify({
             name: jsonFileName,
-            parents: [folderId],
+            parents: [targetFolderId],
             mimeType: 'application/json',
           }),
         });
@@ -372,14 +490,13 @@ export class GoogleDriveService {
     }
   }
 
-  // Delete old .mednote.json files from MedNotes_Backup folder on Google Drive
+  // Delete old .mednote.json files from MedNotes_Backup and all its subfolders on Google Drive
   public async deleteOldJsonBackups(account: CloudAccount): Promise<number> {
     if (account.accessToken.startsWith('demo_token_')) return 0;
     try {
-      const folderId = await this.getOrCreateBackupFolder(account.accessToken);
-      const q = `'${folderId}' in parents and name contains '.mednote.json' and trashed=false`;
+      const q = `name contains '.mednote.json' and trashed=false`;
       const searchRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=100`,
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=200`,
         { headers: { Authorization: `Bearer ${account.accessToken}` } }
       );
       if (!searchRes.ok) return 0;
@@ -399,24 +516,27 @@ export class GoogleDriveService {
     }
   }
 
-  // Sync all notebooks
+  // Sync all notebooks (with folder hierarchy)
   public async syncAllNotebooks(
     notebooks: Notebook[],
     account: CloudAccount,
+    folders?: { id: string; name: string }[],
     onProgress?: (synced: number, total: number) => void,
     getPdfBlob?: (notebook: Notebook) => Promise<Blob | null>
   ): Promise<void> {
     for (let i = 0; i < notebooks.length; i++) {
+      const nb = notebooks[i];
       let pdfBlob: Blob | undefined;
       if (getPdfBlob) {
         try {
-          const b = await getPdfBlob(notebooks[i]);
+          const b = await getPdfBlob(nb);
           if (b) pdfBlob = b;
         } catch (e) {
           console.warn('Could not generate PDF for sync', e);
         }
       }
-      await this.uploadNotebook(notebooks[i], account, pdfBlob);
+      const folderName = nb.folderId && folders ? folders.find((f) => f.id === nb.folderId)?.name : undefined;
+      await this.uploadNotebook(nb, account, pdfBlob, folderName);
       if (onProgress) {
         onProgress(i + 1, notebooks.length);
       }
