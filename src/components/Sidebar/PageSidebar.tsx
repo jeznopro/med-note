@@ -91,44 +91,62 @@ export const PageSidebar: React.FC<PageSidebarProps> = ({
   isDarkMode,
 }) => {
   return (
-    <aside
-      className={`h-[calc(100vh-3.5rem)] border-r flex flex-col z-20 select-none transition-all duration-200 ${
-        isDarkMode
-          ? 'bg-zinc-900/95 border-zinc-800 text-zinc-300'
-          : 'bg-white border-slate-200 text-slate-700'
-      } ${isOpen ? 'w-60' : 'w-12'}`}
-    >
-      <div className="h-12 border-b flex items-center justify-between px-3 border-inherit shrink-0">
-        {isOpen && (
-          <div className="flex items-center gap-1.5 font-semibold text-xs text-zinc-600 dark:text-zinc-400">
-            <FileText className="w-4 h-4 text-blue-500" />
-            <span>Tất cả trang ({pages.length})</span>
-          </div>
-        )}
-
-        <button
+    <>
+      {/* Mobile Backdrop Overlay */}
+      {isOpen && (
+        <div
           onClick={onToggle}
-          title={isOpen ? 'Thu gọn sidebar' : 'Mở rộng sidebar'}
-          className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-lg cursor-pointer ml-auto"
-        >
-          {isOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
-        </button>
-      </div>
+          className="fixed inset-0 bg-black/50 backdrop-blur-xs z-35 md:hidden transition-opacity"
+        />
+      )}
 
-      {isOpen ? (
-        <div className="flex-1 overflow-y-auto p-3 space-y-3">
-          {pages.map((page, index) => {
-            const isSelected = index === currentPageIndex;
-            return (
-              <div
-                key={page.id}
-                onClick={() => onSelectPage(index)}
-                className={`group relative p-2 rounded-xl border transition-all cursor-pointer flex flex-col items-center gap-1.5 ${
-                  isSelected
-                    ? 'border-blue-500 ring-2 ring-blue-500/20 bg-blue-50/50 dark:bg-blue-950/30'
-                    : 'border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-800/40'
-                }`}
-              >
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-72 md:relative md:inset-auto md:z-20 md:h-[calc(100vh-3.5rem)] border-r flex flex-col select-none transition-all duration-300 backdrop-blur-2xl ${
+          isDarkMode
+            ? 'bg-zinc-900/95 border-zinc-800 text-zinc-300'
+            : 'bg-white/95 border-slate-200 text-slate-700'
+        } ${
+          isOpen
+            ? 'translate-x-0 md:w-60'
+            : '-translate-x-full md:translate-x-0 md:w-12'
+        } shadow-2xl md:shadow-none`}
+      >
+        <div className="h-12 border-b flex items-center justify-between px-3 border-inherit shrink-0">
+          {isOpen && (
+            <div className="flex items-center gap-1.5 font-semibold text-xs text-zinc-600 dark:text-zinc-400">
+              <FileText className="w-4 h-4 text-blue-500" />
+              <span>Tất cả trang ({pages.length})</span>
+            </div>
+          )}
+
+          <button
+            onClick={onToggle}
+            title={isOpen ? 'Thu gọn sidebar' : 'Mở rộng sidebar'}
+            className="p-1.5 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-lg cursor-pointer ml-auto"
+          >
+            {isOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
+          </button>
+        </div>
+
+        {isOpen ? (
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {pages.map((page, index) => {
+              const isSelected = index === currentPageIndex;
+              return (
+                <div
+                  key={page.id}
+                  onClick={() => {
+                    onSelectPage(index);
+                    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                      onToggle();
+                    }
+                  }}
+                  className={`group relative p-2 rounded-xl border transition-all cursor-pointer flex flex-col items-center gap-1.5 ${
+                    isSelected
+                      ? 'border-blue-500 ring-2 ring-blue-500/20 bg-blue-50/50 dark:bg-blue-950/30'
+                      : 'border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-800/40'
+                  }`}
+                >
                 <PageThumbnailItem
                   page={page}
                   index={index}
@@ -205,5 +223,6 @@ export const PageSidebar: React.FC<PageSidebarProps> = ({
         </div>
       )}
     </aside>
+    </>
   );
 };

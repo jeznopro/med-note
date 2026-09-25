@@ -23,6 +23,10 @@ import {
   Heart,
   Sun,
   Moon,
+  Menu,
+  X,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { GoogleDriveIcon } from '../Icons/GoogleIcons';
 import type { CloudAccount } from '../../services/googleDrive';
@@ -114,12 +118,16 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [editingCoverNotebook, setEditingCoverNotebook] = useState<Notebook | null>(null);
   const [editingFolder, setEditingFolder] = useState<Folder | null>(null);
   const [activeFolderMenuId, setActiveFolderMenuId] = useState<string | null>(null);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [showMobileActionsMenu, setShowMobileActionsMenu] = useState(false);
 
   // Close menus on click outside
   useEffect(() => {
     const handleClickOutside = () => {
       setActiveMenuId(null);
       setActiveFolderMenuId(null);
+      setShowMobileActionsMenu(false);
     };
     window.addEventListener('click', handleClickOutside);
     return () => window.removeEventListener('click', handleClickOutside);
@@ -243,10 +251,22 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         onChange={handleFolderChange}
       />
 
-      {/* 1. Left Sidebar (Apple Frosted Glass / Glassmorphism) */}
-      <aside className="w-60 border-r flex flex-col shrink-0 transition-colors relative z-10 backdrop-blur-2xl bg-white/60 dark:bg-zinc-950/60 border-slate-200/60 dark:border-white/10 text-slate-700 dark:text-zinc-200 shadow-lg shadow-black/5">
-        {/* macOS Window Controls (Traffic Lights: Red, Yellow, Green) & Dark Mode Toggle */}
-        <div className="h-12 px-4 flex items-center justify-between border-b border-slate-200/40 dark:border-white/10">
+      {/* Mobile Backdrop Overlay for Sidebar */}
+      {isMobileSidebarOpen && (
+        <div
+          onClick={() => setIsMobileSidebarOpen(false)}
+          className="fixed inset-0 bg-black/50 backdrop-blur-xs z-40 md:hidden transition-opacity"
+        />
+      )}
+
+      {/* 1. Left Sidebar (Apple Frosted Glass / Glassmorphism - Responsive Drawer on Mobile & Collapsible on iPad/Desktop) */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-72 md:relative md:z-10 md:w-60 border-r flex flex-col shrink-0 transition-all duration-300 backdrop-blur-2xl bg-white/95 dark:bg-zinc-950/95 md:bg-white/60 md:dark:bg-zinc-950/60 border-slate-200/60 dark:border-white/10 text-slate-700 dark:text-zinc-200 shadow-2xl md:shadow-lg shadow-black/10 ${
+          isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        } ${isSidebarCollapsed ? 'md:hidden' : 'md:flex'}`}
+      >
+        {/* macOS Window Controls (Traffic Lights: Red, Yellow, Green) & Dark Mode / Mobile Close Button */}
+        <div className="h-12 px-4 flex items-center justify-between border-b border-slate-200/40 dark:border-white/10 shrink-0">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-[#FF5F56] border border-[#E0443E]" />
             <div className="w-3 h-3 rounded-full bg-[#FFBD2E] border border-[#DEA123]" />
@@ -254,19 +274,29 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             <span className="font-bold text-xs ml-2 text-slate-800 dark:text-zinc-200">MedNotes</span>
           </div>
 
-          {onToggleDarkMode && (
+          <div className="flex items-center gap-1">
+            {onToggleDarkMode && (
+              <button
+                onClick={onToggleDarkMode}
+                className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer transition-colors backdrop-blur-md"
+                title={isDarkMode ? 'Chuyển sang chế độ Sáng' : 'Chuyển sang chế độ Tối'}
+              >
+                {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-slate-500" />}
+              </button>
+            )}
+            {/* Mobile Close Sidebar Button */}
             <button
-              onClick={onToggleDarkMode}
-              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer transition-colors backdrop-blur-md"
-              title={isDarkMode ? 'Chuyển sang chế độ Sáng' : 'Chuyển sang chế độ Tối'}
+              onClick={() => setIsMobileSidebarOpen(false)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10 md:hidden cursor-pointer"
+              title="Đóng thanh điều hướng"
             >
-              {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-slate-500" />}
+              <X className="w-4 h-4" />
             </button>
-          )}
+          </div>
         </div>
 
         {/* macOS Pill Search Box */}
-        <div className="px-3 pt-3 pb-2">
+        <div className="px-3 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs backdrop-blur-md bg-black/5 dark:bg-white/5 border-slate-300/40 dark:border-white/10 text-slate-700 dark:text-zinc-200 focus-within:ring-2 focus-within:ring-blue-500/30 transition-all">
             <Search className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-400" />
             <input
@@ -280,11 +310,12 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         </div>
 
         {/* Sidebar Navigation Items */}
-        <div className="px-2 py-1 space-y-1 text-xs font-medium">
+        <div className="px-2 py-1 space-y-1 text-xs font-medium shrink-0">
           <button
             onClick={() => {
               setNavFilter('all');
               onSelectFolder(null);
+              setIsMobileSidebarOpen(false);
             }}
             className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all cursor-pointer backdrop-blur-md ${
               navFilter === 'all' && !currentFolderId
@@ -301,6 +332,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             onClick={() => {
               setNavFilter('favorites');
               onSelectFolder(null);
+              setIsMobileSidebarOpen(false);
             }}
             className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all cursor-pointer backdrop-blur-md ${
               navFilter === 'favorites'
@@ -317,7 +349,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         </div>
 
         {/* Medical Folders Section in Sidebar */}
-        <div className="mt-4 px-3 flex items-center justify-between">
+        <div className="mt-4 px-3 flex items-center justify-between shrink-0">
           <span className="text-[10px] font-bold tracking-wider text-slate-400 dark:text-zinc-500 uppercase">
             Môn học / Folders
           </span>
@@ -341,6 +373,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                 onClick={() => {
                   setNavFilter('all');
                   onSelectFolder(folder.id);
+                  setIsMobileSidebarOpen(false);
                 }}
                 className={`group flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer transition-colors backdrop-blur-md ${
                   isSelected
@@ -373,9 +406,12 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         </div>
 
         {/* Footer Google Drive Login / Sync Widget */}
-        <div className="p-3 border-t border-slate-200/40 dark:border-white/10 space-y-2">
+        <div className="p-3 border-t border-slate-200/40 dark:border-white/10 space-y-2 shrink-0">
           <button
-            onClick={onOpenCloudSettings}
+            onClick={() => {
+              onOpenCloudSettings();
+              setIsMobileSidebarOpen(false);
+            }}
             className={`w-full flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all backdrop-blur-xl shadow-xs group ${
               isCloudConnected
                 ? 'bg-emerald-500/15 dark:bg-emerald-950/40 border-emerald-500/30 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/25'
@@ -410,33 +446,51 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       {/* 2. Main Content Area (Documents Grid) */}
       <main className="flex-1 flex flex-col overflow-hidden relative z-10">
         {/* Main Content Header with Frosted Glass Blur */}
-        <header className="h-16 px-8 flex items-center justify-between border-b backdrop-blur-2xl transition-all relative z-10 bg-white/60 dark:bg-zinc-950/60 border-slate-200/60 dark:border-white/10 shadow-xs">
-          {/* Header Title (Image 1 Style: Bold "Documents") */}
-          <div className="flex items-center gap-3">
+        <header className="h-14 sm:h-16 px-3 sm:px-6 md:px-8 flex items-center justify-between border-b backdrop-blur-2xl transition-all relative z-10 bg-white/60 dark:bg-zinc-950/60 border-slate-200/60 dark:border-white/10 shadow-xs">
+          {/* Header Left: Hamburger (Mobile), Sidebar Toggle (iPad/Mac), Title */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {/* Mobile Hamburger Toggle */}
+            <button
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="p-1.5 rounded-xl text-slate-700 dark:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10 md:hidden cursor-pointer transition-colors"
+              title="Mở thanh điều hướng"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            {/* iPadOS / Mac Collapsible Sidebar Toggle Button */}
+            <button
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+              className="hidden md:flex p-1.5 rounded-xl text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer transition-colors"
+              title={isSidebarCollapsed ? 'Hiện thanh bên (iPadOS)' : 'Thu gọn thanh bên'}
+            >
+              {isSidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            </button>
+
+            {/* Header Title */}
             {currentFolderId ? (
-              <div className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+              <div className="flex items-center gap-1.5 sm:gap-2 text-base sm:text-xl md:text-2xl font-bold tracking-tight">
                 <button
                   onClick={() => onSelectFolder(null)}
-                  className="text-slate-400 hover:text-blue-600 cursor-pointer transition-colors"
+                  className="text-slate-400 hover:text-blue-600 cursor-pointer transition-colors text-xs sm:text-base font-semibold"
                 >
-                  Documents
+                  Docs
                 </button>
-                <ChevronRight className="w-5 h-5 text-slate-400" />
-                <span className="text-slate-900 dark:text-zinc-100">{currentFolder?.name}</span>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                <span className="text-slate-900 dark:text-zinc-100 truncate max-w-[130px] sm:max-w-xs">{currentFolder?.name}</span>
               </div>
             ) : (
-              <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-zinc-100">
+              <h1 className="text-lg sm:text-xl md:text-2xl font-extrabold tracking-tight text-slate-900 dark:text-zinc-100">
                 {navFilter === 'favorites' ? 'Favorites' : 'Documents'}
               </h1>
             )}
           </div>
 
-          {/* Center / Right Header Controls: [ Date ] [ Name ] Segmented Control */}
-          <div className="flex items-center gap-3">
+          {/* Right Controls: Desktop Full Bar (xl:flex) vs Tablet/Mobile Compact Bar (flex xl:hidden) */}
+          {/* 1. Desktop Full Controls (xl:flex) */}
+          <div className="hidden xl:flex items-center gap-3">
             {/* Pill Segmented Control [ Date ] [ Name ] */}
-            <div
-              className="flex items-center p-0.5 rounded-lg border text-xs font-semibold backdrop-blur-xl bg-black/5 dark:bg-white/5 border-slate-300/40 dark:border-white/10"
-            >
+            <div className="flex items-center p-0.5 rounded-lg border text-xs font-semibold backdrop-blur-xl bg-black/5 dark:bg-white/5 border-slate-300/40 dark:border-white/10">
               <button
                 onClick={() => setSortBy('date')}
                 className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
@@ -506,7 +560,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               title="Nhập 1 hoặc nhiều tài liệu PDF"
             >
               <Upload className="w-3.5 h-3.5 text-blue-500" />
-              <span className="hidden sm:inline">Nhập PDF</span>
+              <span>Nhập PDF</span>
             </button>
 
             {/* Import Folder Button */}
@@ -516,7 +570,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               title="Nhập toàn bộ thư mục chứa các file PDF từ máy tính"
             >
               <FolderUp className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span className="hidden sm:inline">Nhập cả thư mục</span>
+              <span>Nhập cả thư mục</span>
             </button>
 
             {/* Wallpaper Button */}
@@ -526,7 +580,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               title="Cài đặt hình nền động hoặc ảnh tĩnh cho trang chủ"
             >
               <Palette className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-              <span className="hidden sm:inline">Hình nền</span>
+              <span>Hình nền</span>
             </button>
 
             {/* Dark / Light Mode Toggle Button */}
@@ -539,22 +593,158 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                 {isDarkMode ? (
                   <>
                     <Sun className="w-3.5 h-3.5 text-amber-400" />
-                    <span className="hidden sm:inline">Chế độ Sáng</span>
+                    <span>Sáng</span>
                   </>
                 ) : (
                   <>
                     <Moon className="w-3.5 h-3.5 text-slate-500" />
-                    <span className="hidden sm:inline">Chế độ Tối</span>
+                    <span>Tối</span>
                   </>
                 )}
               </button>
             )}
           </div>
+
+          {/* 2. Tablet (iPad) & Mobile Compact Controls (flex xl:hidden) */}
+          <div className="flex xl:hidden items-center gap-1.5 sm:gap-2">
+            {/* Google Drive Compact Status Button */}
+            <button
+              onClick={onOpenCloudSettings}
+              className={`p-2 rounded-xl border text-xs cursor-pointer transition-all backdrop-blur-xl relative ${
+                isCloudConnected
+                  ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                  : 'border-slate-300/40 dark:border-white/10 bg-white/60 dark:bg-white/5 text-blue-600 dark:text-blue-400'
+              }`}
+              title={isCloudConnected ? `Đã kết nối Drive (${cloudAccount?.email || ''})` : 'Đăng nhập Google Drive'}
+            >
+              {syncStatus === 'syncing' ? (
+                <RefreshCw className="w-4 h-4 animate-spin text-amber-500" />
+              ) : (
+                <GoogleDriveIcon className="w-4 h-4" />
+              )}
+              {isCloudConnected && (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-zinc-900" />
+              )}
+            </button>
+
+            {/* Dark Mode Compact Toggle */}
+            {onToggleDarkMode && (
+              <button
+                onClick={onToggleDarkMode}
+                className="p-2 rounded-xl border border-slate-300/40 dark:border-white/10 bg-white/60 dark:bg-white/5 hover:bg-white/80 dark:hover:bg-white/10 text-slate-700 dark:text-zinc-200 cursor-pointer transition-all backdrop-blur-xl shadow-xs"
+                title={isDarkMode ? 'Chuyển sang chế độ Sáng' : 'Chuyển sang chế độ Tối'}
+              >
+                {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
+              </button>
+            )}
+
+            {/* Quick Add / Actions Menu Button for Mobile & iPad */}
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMobileActionsMenu(!showMobileActionsMenu);
+                }}
+                className="flex items-center gap-1 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md cursor-pointer transition-transform active:scale-95"
+              >
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <span className="hidden sm:inline">Thao tác</span>
+              </button>
+
+              {/* Mobile Actions Dropdown / Sheet */}
+              {showMobileActionsMenu && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute right-0 top-full mt-2 p-1.5 rounded-2xl border shadow-2xl z-50 w-56 backdrop-blur-2xl bg-white/95 dark:bg-zinc-900/95 border-slate-200/80 dark:border-white/10 text-slate-800 dark:text-zinc-100 animate-in fade-in slide-in-from-top-2 duration-150"
+                >
+                  <button
+                    onClick={() => {
+                      setShowMobileActionsMenu(false);
+                      setIsNewNotebookModalOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs hover:bg-blue-50 dark:hover:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-semibold cursor-pointer text-left transition-colors"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>Tạo sổ tay mới</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowMobileActionsMenu(false);
+                      handlePdfUploadClick();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer text-left transition-colors"
+                  >
+                    <Upload className="w-4 h-4 text-emerald-500" />
+                    <span>Nhập tài liệu PDF</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowMobileActionsMenu(false);
+                      handleFolderUploadClick();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer text-left transition-colors"
+                  >
+                    <FolderUp className="w-4 h-4 text-indigo-500" />
+                    <span>Nhập cả thư mục PDF</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowMobileActionsMenu(false);
+                      setIsCreatingFolder(true);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer text-left transition-colors"
+                  >
+                    <FolderIcon className="w-4 h-4 text-amber-500" />
+                    <span>Tạo thư mục môn học</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowMobileActionsMenu(false);
+                      setIsWallpaperModalOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer text-left transition-colors"
+                  >
+                    <Palette className="w-4 h-4 text-purple-500" />
+                    <span>Cài đặt hình nền</span>
+                  </button>
+
+                  <div className="h-px bg-slate-200/50 dark:bg-white/10 my-1" />
+
+                  {/* Sort Controls in Mobile Menu */}
+                  <div className="px-3 py-1.5 flex items-center justify-between text-xs text-slate-500">
+                    <span className="text-[10px] uppercase font-bold tracking-wider opacity-70">Sắp xếp:</span>
+                    <div className="flex items-center gap-1 font-semibold">
+                      <button
+                        onClick={() => setSortBy('date')}
+                        className={`px-2 py-0.5 rounded text-[11px] cursor-pointer ${
+                          sortBy === 'date' ? 'bg-blue-600 text-white' : 'hover:bg-black/5 dark:hover:bg-white/10'
+                        }`}
+                      >
+                        Ngày
+                      </button>
+                      <button
+                        onClick={() => setSortBy('name')}
+                        className={`px-2 py-0.5 rounded text-[11px] cursor-pointer ${
+                          sortBy === 'name' ? 'bg-blue-600 text-white' : 'hover:bg-black/5 dark:hover:bg-white/10'
+                        }`}
+                      >
+                        Tên
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </header>
 
         {/* Grid Cards Container (Image 1 replica: Grid layout of New..., Notebooks, and Folders) */}
-        <div className="flex-1 overflow-y-auto p-8 lg:p-10 relative z-10">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-7 max-w-7xl">
+        <div className="flex-1 overflow-y-auto p-3.5 sm:p-6 md:p-8 lg:p-10 pb-24 md:pb-10 relative z-10">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-5 md:gap-7 max-w-7xl mx-auto">
             {/* Card 1: [ + ] New... (Exact replica of Image 1) */}
             <div className="relative flex flex-col items-center">
               <div
@@ -1092,6 +1282,64 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           </div>
         </div>
       </main>
+
+      {/* 3. Mobile Bottom Navigation Bar (Apple iOS Tab Bar Style) */}
+      <nav className="fixed bottom-0 inset-x-0 h-14 bg-white/85 dark:bg-zinc-950/85 backdrop-blur-2xl border-t border-slate-200/60 dark:border-white/10 z-30 flex items-center justify-around md:hidden px-2 shadow-lg select-none">
+        <button
+          onClick={() => {
+            setNavFilter('all');
+            onSelectFolder(null);
+          }}
+          className={`flex flex-col items-center justify-center flex-1 py-1 cursor-pointer transition-colors ${
+            navFilter === 'all' && !currentFolderId
+              ? 'text-blue-600 dark:text-blue-400 font-bold'
+              : 'text-slate-500 dark:text-zinc-400'
+          }`}
+        >
+          <LayoutGrid className="w-4 h-4" />
+          <span className="text-[10px] mt-0.5 font-medium">Tài liệu</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setNavFilter('favorites');
+            onSelectFolder(null);
+          }}
+          className={`flex flex-col items-center justify-center flex-1 py-1 cursor-pointer transition-colors ${
+            navFilter === 'favorites'
+              ? 'text-amber-500 font-bold'
+              : 'text-slate-500 dark:text-zinc-400'
+          }`}
+        >
+          <Bookmark className="w-4 h-4" />
+          <span className="text-[10px] mt-0.5 font-medium">Yêu thích</span>
+        </button>
+
+        <button
+          onClick={() => setIsMobileSidebarOpen(true)}
+          className={`flex flex-col items-center justify-center flex-1 py-1 cursor-pointer transition-colors ${
+            currentFolderId
+              ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+              : 'text-slate-500 dark:text-zinc-400'
+          }`}
+        >
+          <FolderIcon className="w-4 h-4" />
+          <span className="text-[10px] mt-0.5 font-medium">Môn học</span>
+        </button>
+
+        <button
+          onClick={onOpenCloudSettings}
+          className="flex flex-col items-center justify-center flex-1 py-1 cursor-pointer text-slate-500 dark:text-zinc-400 hover:text-emerald-500 transition-colors"
+        >
+          <div className="relative">
+            <GoogleDriveIcon className="w-4 h-4" />
+            {isCloudConnected && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-zinc-950" />
+            )}
+          </div>
+          <span className="text-[10px] mt-0.5 font-medium">Drive</span>
+        </button>
+      </nav>
 
       {/* New Notebook Modal */}
       <NewNotebookModal

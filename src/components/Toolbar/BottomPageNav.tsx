@@ -27,9 +27,9 @@ export const BottomPageNav: React.FC<BottomPageNavProps> = ({
   const [showJumpMenu, setShowJumpMenu] = useState(false);
 
   return (
-    <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-30 select-none">
+    <div className="fixed bottom-3 sm:bottom-5 left-1/2 -translate-x-1/2 z-30 select-none pb-[env(safe-area-inset-bottom)] max-w-[calc(100vw-1.5rem)]">
       <div
-        className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full border shadow-xl backdrop-blur-md transition-all animate-in fade-in slide-in-from-bottom-3 duration-300 ${
+        className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-full border shadow-xl backdrop-blur-md transition-all animate-in fade-in slide-in-from-bottom-3 duration-300 ${
           isDarkMode
             ? 'bg-zinc-900/90 border-zinc-700 text-zinc-100 shadow-black/40'
             : 'bg-white/95 border-slate-200/90 text-slate-800 shadow-slate-300/40'

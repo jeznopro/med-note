@@ -120,6 +120,9 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showPageJump, setShowPageJump] = useState(false);
+  const [showMobileTabPicker, setShowMobileTabPicker] = useState(false);
+
+  const activeTab = openTabs.find((t) => t.id === activeNotebookId);
 
   const activeColor =
     toolState.currentTool === 'highlighter'
@@ -143,19 +146,19 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
 
   return (
     <header className="flex flex-col z-30 select-none shadow-xs font-sans">
-      {/* 1. TOP NAV BAR (Crisp Apple/GoodNotes Pure Light Theme) */}
+      {/* 1. TOP NAV BAR (Crisp Apple/GoodNotes Responsive Header) */}
       <div
-        className={`h-11 px-3 border-b flex items-center justify-between text-xs transition-colors ${
+        className={`h-11 px-2.5 sm:px-3 border-b flex items-center justify-between text-xs transition-colors ${
           isDarkMode
             ? 'bg-zinc-950 border-zinc-800 text-zinc-300'
             : 'bg-white border-slate-200 text-slate-700'
         }`}
       >
         {/* Left: Back to Documents Library */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={onBackToLibrary}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-bold cursor-pointer transition-colors ${
+            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-lg font-bold cursor-pointer transition-colors ${
               isDarkMode
                 ? 'hover:bg-zinc-800 text-blue-400'
                 : 'hover:bg-slate-100 text-blue-600'
@@ -163,19 +166,21 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
             title="Quay lại Thư viện tài liệu (Documents)"
           >
             <ChevronLeft className="w-4 h-4 text-blue-600 stroke-[2.5]" />
-            <span className="tracking-tight text-xs text-slate-800 dark:text-zinc-200">Documents</span>
+            <span className="tracking-tight text-xs text-slate-800 dark:text-zinc-200 hidden sm:inline">Documents</span>
+            <span className="tracking-tight text-xs text-slate-800 dark:text-zinc-200 sm:hidden font-semibold">Docs</span>
           </button>
         </div>
 
-        {/* Center: Open Document Tabs (GoodNotes Clean Light Tabs) */}
-        <div className="flex-1 flex items-center overflow-x-auto px-4 gap-1.5 scrollbar-none max-w-3xl">
+        {/* Center: Open Document Tabs on Desktop (md:flex) vs Dropdown Switcher on Mobile (flex md:hidden) */}
+        {/* Desktop Tabs */}
+        <div className="hidden md:flex flex-1 items-center overflow-x-auto px-4 gap-1.5 scrollbar-none max-w-2xl">
           {openTabs.map((tab) => {
             const isActive = tab.id === activeNotebookId;
             return (
               <div
                 key={tab.id}
                 onClick={() => onSelectTab(tab.id)}
-                className={`flex items-center gap-2 px-3 py-1 rounded-lg max-w-[220px] cursor-pointer text-xs transition-all ${
+                className={`flex items-center gap-2 px-3 py-1 rounded-lg max-w-[200px] cursor-pointer text-xs transition-all ${
                   isActive
                     ? isDarkMode
                       ? 'bg-zinc-800 text-white font-bold shadow-xs'
@@ -217,12 +222,55 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
           </button>
         </div>
 
+        {/* Mobile Active Notebook Title & Dropdown Switcher */}
+        <div className="flex md:hidden items-center relative gap-1 max-w-[150px] sm:max-w-[220px]">
+          <button
+            onClick={() => setShowMobileTabPicker(!showMobileTabPicker)}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-black/5 dark:bg-white/10 text-xs font-semibold cursor-pointer truncate max-w-full"
+            title="Bấm để chuyển sổ tay đang mở"
+          >
+            <span className="truncate">{activeTab?.title || 'Sổ tay'}</span>
+            {openTabs.length > 1 && <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />}
+          </button>
+
+          {showMobileTabPicker && openTabs.length > 1 && (
+            <div className="absolute top-full left-0 mt-1 p-1.5 rounded-xl border shadow-2xl z-50 w-52 backdrop-blur-2xl bg-white/95 dark:bg-zinc-900/95 border-slate-200/80 dark:border-white/10 text-slate-800 dark:text-zinc-100">
+              <div className="text-[10px] font-bold px-2 py-1 text-slate-400 uppercase">Sổ tay đang mở</div>
+              {openTabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  onClick={() => {
+                    onSelectTab(tab.id);
+                    setShowMobileTabPicker(false);
+                  }}
+                  className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer ${
+                    tab.id === activeNotebookId
+                      ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold'
+                      : 'hover:bg-black/5 dark:hover:bg-white/10'
+                  }`}
+                >
+                  <span className="truncate">{tab.title}</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTab(tab.id);
+                    }}
+                    className="p-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-slate-400"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Right: Cloud Sync, Export Menu & Dark mode */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           {/* Google Drive Login / Auto-Sync Button */}
           <button
             onClick={onOpenCloudSettings}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all shadow-2xs group ${
+            className={`flex items-center gap-1.5 px-2 sm:px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all shadow-2xs group ${
               isCloudConnected
                 ? isDarkMode
                   ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-900/60'
@@ -242,12 +290,12 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
             ) : (
               <GoogleDriveIcon className="w-3.5 h-3.5 shrink-0 transition-transform group-hover:scale-110" />
             )}
-            <span className="text-[11px] font-bold">
+            <span className="text-[11px] font-bold hidden sm:inline">
               {syncStatus === 'syncing'
                 ? 'Đang lưu Drive...'
                 : isCloudConnected
                 ? 'Đã kết nối Drive'
-                : 'Đăng nhập Google Drive'}
+                : 'Đăng nhập Drive'}
             </span>
             {isCloudConnected && (
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
@@ -258,7 +306,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
           <div className="relative">
             <button
               onClick={() => setShowExportMenu(!showExportMenu)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium cursor-pointer transition-colors ${
+              className={`flex items-center gap-1 p-1.5 sm:px-2.5 sm:py-1 rounded-lg font-medium cursor-pointer transition-colors ${
                 isDarkMode ? 'hover:bg-zinc-800 text-zinc-300' : 'hover:bg-slate-100 text-slate-700 border border-slate-200'
               }`}
               title="Xuất file (PDF / PNG)"
@@ -309,16 +357,16 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
           <button
             onClick={onToggleDarkMode}
             title={isDarkMode ? 'Chuyển giao diện sáng' : 'Chuyển giao diện tối'}
-            className="p-1.5 rounded-lg cursor-pointer transition-colors hover:bg-white/15 text-white"
+            className="p-1.5 rounded-lg cursor-pointer transition-colors hover:bg-black/5 dark:hover:bg-white/10 text-slate-700 dark:text-zinc-200"
           >
-            {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-300" /> : <Moon className="w-3.5 h-3.5 text-white" />}
+            {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-slate-600" />}
           </button>
         </div>
       </div>
 
       {/* 2. SECOND TOOLBAR: The Drawing Toolbar (Apple Minimalist Pure White - Exact Image 2 Style) */}
       <div
-        className={`h-12 border-b flex items-center justify-between px-4 text-xs transition-colors ${
+        className={`h-12 border-b flex items-center justify-between px-2 sm:px-4 text-xs transition-colors overflow-x-auto scrollbar-none gap-2 sm:gap-3 shrink-0 ${
           isDarkMode
             ? 'bg-zinc-900 border-zinc-800 text-zinc-200'
             : 'bg-white border-slate-200/90 text-slate-700'
