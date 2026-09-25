@@ -70,6 +70,8 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedOrigin, setCopiedOrigin] = useState(false);
   const [backupSuccessMsg, setBackupSuccessMsg] = useState<string | null>(null);
+  const [isCleaningJson, setIsCleaningJson] = useState(false);
+  const [cleanJsonMsg, setCleanJsonMsg] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -81,6 +83,21 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
     navigator.clipboard.writeText(currentOrigin);
     setCopiedOrigin(true);
     setTimeout(() => setCopiedOrigin(false), 2000);
+  };
+
+  const handleCleanOldJson = async () => {
+    if (!account) return;
+    setIsCleaningJson(true);
+    setCleanJsonMsg(null);
+    try {
+      const deleted = await gdrive.deleteOldJsonBackups(account);
+      setCleanJsonMsg(`Đã dọn dẹp ${deleted} file .mednote.json cũ! Thư mục Drive giờ chỉ chứa file .pdf`);
+      setTimeout(() => setCleanJsonMsg(null), 5000);
+    } catch (e) {
+      setCleanJsonMsg('Không thể dọn dẹp: ' + (e as Error).message);
+    } finally {
+      setIsCleaningJson(false);
+    }
   };
 
   // 1-Click Fast Login
@@ -314,8 +331,36 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
                     className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors disabled:opacity-50 shadow-xs"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${syncInfo.status === 'syncing' ? 'animate-spin' : ''}`} />
-                    <span>{syncInfo.status === 'syncing' ? 'Đang đồng bộ lên Google Drive...' : 'Đồng bộ ngay (Sync Now)'}</span>
+                    <span>{syncInfo.status === 'syncing' ? 'Đang đồng bộ PDF lên Google Drive...' : 'Đồng bộ & Xuất PDF lên Drive ngay'}</span>
                   </button>
+
+                  {/* Format indicator & Clean up old .json files button */}
+                  <div className="pt-2 border-t border-inherit space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                      <span>Định dạng tải lên:</span>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">File tài liệu PDF (.pdf)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCleanOldJson}
+                      disabled={isCleaningJson}
+                      className="w-full py-2 px-3 rounded-lg border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-[11px] text-zinc-600 dark:text-zinc-300 font-medium flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      {isCleaningJson ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Đang dọn dẹp...</span>
+                        </>
+                      ) : (
+                        <span>🧹 Xóa sạch các file .json cũ trên Drive (Chỉ để lại file PDF)</span>
+                      )}
+                    </button>
+                    {cleanJsonMsg && (
+                      <p className="text-[11px] text-emerald-600 dark:text-emerald-400 text-center font-medium">
+                        {cleanJsonMsg}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 /* Not Connected: High-Converting, Clear Login Options */

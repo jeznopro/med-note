@@ -252,7 +252,7 @@ export class GoogleDriveService {
     }
 
     const folderId = await this.getOrCreateBackupFolder(account.accessToken);
-    const cleanTitle = notebook.title.replace(/[/\\?%*:|"<>]/g, '_');
+    const cleanTitle = notebook.title.replace(/[/\\?%*:|"<>]/g, '_').trim();
 
     // 1. Upload/Update Rendered PDF file (.pdf) for direct viewing on Google Drive & mobile
     if (pdfBlob) {
@@ -264,17 +264,40 @@ export class GoogleDriveService {
           { headers: { Authorization: `Bearer ${account.accessToken}` } }
         );
 
-        let existingPdfId: string | null = null;
+        let targetPdfId: string | null = null;
         if (pdfSearchRes.ok) {
           const data = await pdfSearchRes.json();
           if (data.files && data.files.length > 0) {
-            existingPdfId = data.files[0].id;
+            targetPdfId = data.files[0].id;
           }
         }
 
-        if (existingPdfId) {
-          await fetch(
-            `https://www.googleapis.com/upload/drive/v3/files/${existingPdfId}?uploadType=media`,
+        // If file doesn't exist, create file metadata first (bulletproof 2-step Google Drive API upload)
+        if (!targetPdfId) {
+          const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${account.accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              name: pdfFileName,
+              parents: [folderId],
+              mimeType: 'application/pdf',
+            }),
+          });
+          if (createRes.ok) {
+            const data = await createRes.json();
+            targetPdfId = data.id;
+          } else {
+            console.error('Failed to create PDF metadata on Drive:', await createRes.text());
+          }
+        }
+
+        // Upload/Update binary content
+        if (targetPdfId) {
+          const uploadRes = await fetch(
+            `https://www.googleapis.com/upload/drive/v3/files/${targetPdfId}?uploadType=media`,
             {
               method: 'PATCH',
               headers: {
@@ -284,76 +307,95 @@ export class GoogleDriveService {
               body: pdfBlob,
             }
           );
-        } else {
-          const metadata = {
-            name: pdfFileName,
-            parents: [folderId],
-            mimeType: 'application/pdf',
-          };
-          const form = new FormData();
-          form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-          form.append('file', pdfBlob);
-
-          await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${account.accessToken}` },
-            body: form,
-          });
+          if (!uploadRes.ok) {
+            console.error('Failed to upload PDF binary on Drive:', await uploadRes.text());
+          }
         }
       } catch (err) {
-        console.warn('Failed to upload PDF file to Drive:', err);
+        console.error('Failed to upload PDF file to Drive:', err);
       }
     }
 
     // 2. Upload/Update Vector JSON backup (.mednote.json for restoring vector edit layers)
-    const jsonFileName = `${cleanTitle}.mednote.json`;
-    const q = `name='${jsonFileName}' and '${folderId}' in parents and trashed=false`;
-    const searchRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
-      { headers: { Authorization: `Bearer ${account.accessToken}` } }
-    );
+    try {
+      const jsonFileName = `${cleanTitle}.mednote.json`;
+      const q = `name='${jsonFileName}' and '${folderId}' in parents and trashed=false`;
+      const searchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
+        { headers: { Authorization: `Bearer ${account.accessToken}` } }
+      );
 
-    let existingFileId: string | null = null;
-    if (searchRes.ok) {
-      const data = await searchRes.json();
-      if (data.files && data.files.length > 0) {
-        existingFileId = data.files[0].id;
+      let targetJsonId: string | null = null;
+      if (searchRes.ok) {
+        const data = await searchRes.json();
+        if (data.files && data.files.length > 0) {
+          targetJsonId = data.files[0].id;
+        }
       }
-    }
 
-    const payload = JSON.stringify(notebook, null, 2);
-    const blob = new Blob([payload], { type: 'application/json' });
-
-    if (existingFileId) {
-      // Update existing file
-      await fetch(
-        `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`,
-        {
-          method: 'PATCH',
+      if (!targetJsonId) {
+        const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+          method: 'POST',
           headers: {
             Authorization: `Bearer ${account.accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: blob,
+          body: JSON.stringify({
+            name: jsonFileName,
+            parents: [folderId],
+            mimeType: 'application/json',
+          }),
+        });
+        if (createRes.ok) {
+          const data = await createRes.json();
+          targetJsonId = data.id;
         }
+      }
+
+      if (targetJsonId) {
+        const payload = JSON.stringify(notebook, null, 2);
+        const blob = new Blob([payload], { type: 'application/json' });
+        await fetch(
+          `https://www.googleapis.com/upload/drive/v3/files/${targetJsonId}?uploadType=media`,
+          {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${account.accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: blob,
+          }
+        );
+      }
+    } catch (jsonErr) {
+      console.warn('Vector JSON backup error:', jsonErr);
+    }
+  }
+
+  // Delete old .mednote.json files from MedNotes_Backup folder on Google Drive
+  public async deleteOldJsonBackups(account: CloudAccount): Promise<number> {
+    if (account.accessToken.startsWith('demo_token_')) return 0;
+    try {
+      const folderId = await this.getOrCreateBackupFolder(account.accessToken);
+      const q = `'${folderId}' in parents and name contains '.mednote.json' and trashed=false`;
+      const searchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=100`,
+        { headers: { Authorization: `Bearer ${account.accessToken}` } }
       );
-    } else {
-      // Create new multipart file with parent folder
-      const metadata = {
-        name: jsonFileName,
-        parents: [folderId],
-        mimeType: 'application/json',
-      };
-
-      const form = new FormData();
-      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-      form.append('file', blob);
-
-      await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${account.accessToken}` },
-        body: form,
-      });
+      if (!searchRes.ok) return 0;
+      const data = await searchRes.json();
+      let count = 0;
+      for (const file of data.files || []) {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${account.accessToken}` },
+        });
+        count++;
+      }
+      return count;
+    } catch (err) {
+      console.warn('Failed to clean up old JSON backups:', err);
+      return 0;
     }
   }
 
