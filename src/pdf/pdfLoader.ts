@@ -147,14 +147,14 @@ export async function getPdfDocument(
         cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
         cMapPacked: true,
       });
-    } else if (typeof source === 'string' && source) {
+    } else if (typeof source === 'string' && source && !source.startsWith('blob:')) {
       loadingTask = pdfjsLib.getDocument({
         url: source,
         cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
         cMapPacked: true,
       });
     } else {
-      throw new Error('No PDF source or stored data found');
+      throw new Error('PDF_BINARY_NOT_FOUND');
     }
 
     const doc = await loadingTask.promise;

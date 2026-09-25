@@ -90,7 +90,22 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.scale(dpr, dpr);
-          renderPageBackground(ctx, width, height, template, isDarkMode);
+          // Always fill clean white paper for PDF documents to prevent pitch-black screen
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+
+          ctx.fillStyle = '#334155';
+          ctx.font = 'bold 18px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`Trang PDF ${pdfPageNumber}`, width / 2, height / 2 - 24);
+
+          ctx.fillStyle = '#64748B';
+          ctx.font = '13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          ctx.fillText('Đang nạp hoặc cần đồng bộ file PDF gốc từ Cloud...', width / 2, height / 2 + 8);
+
+          ctx.fillStyle = '#94A3B8';
+          ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          ctx.fillText('(Nếu dùng thiết bị mới, vui lòng bấm biểu tượng Cloud để tải dữ liệu)', width / 2, height / 2 + 32);
           ctx.restore();
         }
       }
@@ -512,8 +527,8 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
           <div
             className={`relative shadow-2xl transition-shadow ${
               isDarkMode
-                ? 'shadow-black/60 ring-1 ring-zinc-800'
-                : 'shadow-slate-400/30 ring-1 ring-slate-200'
+                ? 'shadow-black/60 ring-1 ring-zinc-800 bg-[#18181B]'
+                : 'shadow-slate-400/30 ring-1 ring-slate-200 bg-white'
             }`}
             style={{
               width: `${width}px`,

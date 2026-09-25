@@ -136,7 +136,12 @@ export default function App() {
     } catch {}
     return false;
   });
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 768;
+    }
+    return false;
+  });
   const [scrollMode, setScrollMode] = useState<'continuous' | 'single'>('continuous');
 
   // Library State (Persisted in LocalStorage)
@@ -752,6 +757,16 @@ export default function App() {
       setOpenNotebookIds((prev) => [...prev, notebook.id]);
     }
     setActiveNotebookId(notebook.id);
+    if (typeof window !== 'undefined') {
+      const screenWidth = window.innerWidth;
+      if (screenWidth < 768) {
+        setIsSidebarOpen(false);
+        const mobileScale = Math.max(0.35, Math.min(1.0, (screenWidth - 24) / 820));
+        setTransform({ scale: mobileScale, offsetX: 0, offsetY: 0 });
+      } else {
+        setTransform({ scale: 1.0, offsetX: 0, offsetY: 0 });
+      }
+    }
     setViewMode('editor');
   };
 

@@ -1,4 +1,5 @@
 import type { Notebook, Folder } from '../types/document';
+import { savePdfBinary, getPdfBinary } from './pdfStorage';
 
 export interface CloudAccount {
   email: string;
@@ -637,6 +638,7 @@ export class GoogleDriveService {
           if (downloadRes.ok) {
             const libraryData = await downloadRes.json();
             if (libraryData && Array.isArray(libraryData.notebooks)) {
+              await this.restorePdfBinariesForNotebooks(libraryData.notebooks, account.accessToken);
               return {
                 notebooks: libraryData.notebooks,
                 folders: libraryData.folders || [],
@@ -674,6 +676,7 @@ export class GoogleDriveService {
             }
           }
           if (downloadedNotebooks.length > 0) {
+            await this.restorePdfBinariesForNotebooks(downloadedNotebooks, account.accessToken);
             return {
               notebooks: downloadedNotebooks,
               folders: [],
@@ -685,7 +688,50 @@ export class GoogleDriveService {
       return null;
     } catch (e) {
       console.error('Failed to download library from Drive:', e);
-      throw e;
+      return null;
+    }
+  }
+
+  // Auto-download original PDF binary files from Google Drive if missing on local device
+  private async restorePdfBinariesForNotebooks(
+    notebooks: Notebook[],
+    accessToken: string
+  ): Promise<void> {
+    for (const nb of notebooks) {
+      const isPdf = !!nb.pdfFileName || nb.pages.some((p) => p.pdfPageNumber);
+      if (!isPdf) continue;
+
+      try {
+        const existing = await getPdfBinary(nb.id);
+        if (!existing && !accessToken.startsWith('demo_token_')) {
+          const cleanTitle = nb.title.replace(/[/\\?%*:|"<>]/g, '_').trim();
+          const pdfName = nb.pdfFileName || `${cleanTitle}.pdf`;
+          const qPdf = `name='${pdfName}' and mimeType='application/pdf' and trashed=false`;
+          const searchPdfRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qPdf)}&fields=files(id)`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (searchPdfRes.ok) {
+            const data = await searchPdfRes.json();
+            if (data.files && data.files.length > 0) {
+              const fileId = data.files[0].id;
+              const pdfRes = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+              );
+              if (pdfRes.ok) {
+                const buffer = await pdfRes.arrayBuffer();
+                await savePdfBinary(nb.id, buffer, pdfName);
+                nb.pdfDataUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
+              }
+            }
+          }
+        } else if (existing) {
+          nb.pdfDataUrl = URL.createObjectURL(new Blob([existing], { type: 'application/pdf' }));
+        }
+      } catch (err) {
+        console.warn('Could not auto-restore PDF binary for notebook:', nb.title, err);
+      }
     }
   }
 
