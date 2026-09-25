@@ -104,3 +104,39 @@ export async function exportNotebookAsPdf(
 
   doc.save(`${notebook.title || 'MedNotes'}.pdf`);
 }
+
+export async function generateNotebookPdfBlob(
+  notebook: Notebook,
+  isDarkMode: boolean = false,
+  onProgress?: (current: number, total: number) => void
+): Promise<Blob> {
+  if (notebook.pages.length === 0) return new Blob([], { type: 'application/pdf' });
+
+  const firstPage = notebook.pages[0];
+  const orientation = firstPage.width > firstPage.height ? 'landscape' : 'portrait';
+
+  const doc = new jsPDF({
+    orientation,
+    unit: 'pt',
+    format: [firstPage.width, firstPage.height],
+  });
+
+  const total = notebook.pages.length;
+
+  for (let i = 0; i < total; i++) {
+    if (onProgress) onProgress(i + 1, total);
+
+    const page = notebook.pages[i];
+    if (i > 0) {
+      doc.addPage([page.width, page.height], page.width > page.height ? 'landscape' : 'portrait');
+    }
+
+    const canvas = await renderFullPageToCanvas(page, notebook.pdfDataUrl, isDarkMode);
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+
+    doc.addImage(imgData, 'JPEG', 0, 0, page.width, page.height);
+  }
+
+  return doc.output('blob');
+}
+

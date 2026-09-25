@@ -8,7 +8,7 @@ import { PageSidebar } from './components/Sidebar/PageSidebar';
 import { NoteCanvas } from './components/Canvas/NoteCanvas';
 import { DocumentLibrary } from './components/Library/DocumentLibrary';
 import { createNotebookFromPdf } from './pdf/pdfLoader';
-import { exportNotebookAsPdf, exportCurrentPageAsPng } from './pdf/pdfExporter';
+import { exportNotebookAsPdf, exportCurrentPageAsPng, generateNotebookPdfBlob } from './pdf/pdfExporter';
 import { GoogleDriveService, type CloudAccount, type SyncStatusInfo } from './services/googleDrive';
 import { CloudSettingsModal } from './components/Modals/CloudSettingsModal';
 import { BottomPageNav } from './components/Toolbar/BottomPageNav';
@@ -329,7 +329,13 @@ export default function App() {
       if (!activeNotebook) return;
       setSyncInfo((prev) => ({ ...prev, status: 'syncing' }));
       try {
-        await gdrive.uploadNotebook(activeNotebook, cloudAccount);
+        let pdfBlob: Blob | undefined;
+        try {
+          pdfBlob = await generateNotebookPdfBlob(activeNotebook, isDarkMode);
+        } catch (pdfErr) {
+          console.warn('Could not generate PDF blob for auto-sync', pdfErr);
+        }
+        await gdrive.uploadNotebook(activeNotebook, cloudAccount, pdfBlob);
         setSyncInfo({
           status: 'success',
           lastSyncTime: Date.now(),
@@ -348,7 +354,7 @@ export default function App() {
     return () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
-  }, [notebooks, cloudAccount, autoSyncEnabled, activeNotebook, gdrive]);
+  }, [notebooks, cloudAccount, autoSyncEnabled, activeNotebook, gdrive, isDarkMode]);
 
   // Google Drive Auth Handlers
   const handleSignInGoogle = async (
@@ -360,7 +366,12 @@ export default function App() {
     setCloudAccount(acc);
     setSyncInfo((prev) => ({ ...prev, status: 'syncing' }));
     try {
-      await gdrive.syncAllNotebooks(notebooks, acc);
+      await gdrive.syncAllNotebooks(
+        notebooks,
+        acc,
+        undefined,
+        async (nb) => generateNotebookPdfBlob(nb, isDarkMode)
+      );
       setSyncInfo({
         status: 'success',
         lastSyncTime: Date.now(),
@@ -390,7 +401,12 @@ export default function App() {
     if (!cloudAccount) return;
     setSyncInfo((prev) => ({ ...prev, status: 'syncing' }));
     try {
-      await gdrive.syncAllNotebooks(notebooks, cloudAccount);
+      await gdrive.syncAllNotebooks(
+        notebooks,
+        cloudAccount,
+        undefined,
+        async (nb) => generateNotebookPdfBlob(nb, isDarkMode)
+      );
       setSyncInfo({
         status: 'success',
         lastSyncTime: Date.now(),

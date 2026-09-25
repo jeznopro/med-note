@@ -222,8 +222,12 @@ export class GoogleDriveService {
     return folderData.id;
   }
 
-  // Backup single notebook to Google Drive
-  public async uploadNotebook(notebook: Notebook, account: CloudAccount): Promise<void> {
+  // Backup single notebook to Google Drive (uploads rendered PDF and vector JSON)
+  public async uploadNotebook(
+    notebook: Notebook,
+    account: CloudAccount,
+    pdfBlob?: Blob
+  ): Promise<void> {
     if (account.accessToken.startsWith('demo_token_')) {
       // Simulate cloud latency
       await new Promise((r) => setTimeout(r, 400));
@@ -237,6 +241,7 @@ export class GoogleDriveService {
           updatedAt: Date.now(),
           pagesCount: notebook.pages.length,
           folder: DEFAULT_FOLDER_NAME,
+          hasPdf: !!pdfBlob,
           data: notebook,
         };
         localStorage.setItem(cloudStorageKey, JSON.stringify(existingData));
@@ -247,10 +252,62 @@ export class GoogleDriveService {
     }
 
     const folderId = await this.getOrCreateBackupFolder(account.accessToken);
-    const fileName = `${notebook.title.replace(/[/\\?%*:|"<>]/g, '_')}.mednote.json`;
+    const cleanTitle = notebook.title.replace(/[/\\?%*:|"<>]/g, '_');
 
-    // 1. Check if file exists in the folder
-    const q = `name='${fileName}' and '${folderId}' in parents and trashed=false`;
+    // 1. Upload/Update Rendered PDF file (.pdf) for direct viewing on Google Drive & mobile
+    if (pdfBlob) {
+      try {
+        const pdfFileName = `${cleanTitle}.pdf`;
+        const qPdf = `name='${pdfFileName}' and '${folderId}' in parents and trashed=false`;
+        const pdfSearchRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qPdf)}&fields=files(id)`,
+          { headers: { Authorization: `Bearer ${account.accessToken}` } }
+        );
+
+        let existingPdfId: string | null = null;
+        if (pdfSearchRes.ok) {
+          const data = await pdfSearchRes.json();
+          if (data.files && data.files.length > 0) {
+            existingPdfId = data.files[0].id;
+          }
+        }
+
+        if (existingPdfId) {
+          await fetch(
+            `https://www.googleapis.com/upload/drive/v3/files/${existingPdfId}?uploadType=media`,
+            {
+              method: 'PATCH',
+              headers: {
+                Authorization: `Bearer ${account.accessToken}`,
+                'Content-Type': 'application/pdf',
+              },
+              body: pdfBlob,
+            }
+          );
+        } else {
+          const metadata = {
+            name: pdfFileName,
+            parents: [folderId],
+            mimeType: 'application/pdf',
+          };
+          const form = new FormData();
+          form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+          form.append('file', pdfBlob);
+
+          await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${account.accessToken}` },
+            body: form,
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to upload PDF file to Drive:', err);
+      }
+    }
+
+    // 2. Upload/Update Vector JSON backup (.mednote.json for restoring vector edit layers)
+    const jsonFileName = `${cleanTitle}.mednote.json`;
+    const q = `name='${jsonFileName}' and '${folderId}' in parents and trashed=false`;
     const searchRes = await fetch(
       `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
       { headers: { Authorization: `Bearer ${account.accessToken}` } }
@@ -283,7 +340,7 @@ export class GoogleDriveService {
     } else {
       // Create new multipart file with parent folder
       const metadata = {
-        name: fileName,
+        name: jsonFileName,
         parents: [folderId],
         mimeType: 'application/json',
       };
@@ -304,10 +361,20 @@ export class GoogleDriveService {
   public async syncAllNotebooks(
     notebooks: Notebook[],
     account: CloudAccount,
-    onProgress?: (synced: number, total: number) => void
+    onProgress?: (synced: number, total: number) => void,
+    getPdfBlob?: (notebook: Notebook) => Promise<Blob | null>
   ): Promise<void> {
     for (let i = 0; i < notebooks.length; i++) {
-      await this.uploadNotebook(notebooks[i], account);
+      let pdfBlob: Blob | undefined;
+      if (getPdfBlob) {
+        try {
+          const b = await getPdfBlob(notebooks[i]);
+          if (b) pdfBlob = b;
+        } catch (e) {
+          console.warn('Could not generate PDF for sync', e);
+        }
+      }
+      await this.uploadNotebook(notebooks[i], account, pdfBlob);
       if (onProgress) {
         onProgress(i + 1, notebooks.length);
       }
