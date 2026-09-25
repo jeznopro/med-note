@@ -245,6 +245,48 @@ export default function App() {
     lastSyncTime: null,
     syncedFilesCount: 0,
   });
+
+  // Auto-restore library on startup if connected to Google Drive and local is still initial sample
+  useEffect(() => {
+    if (!cloudAccount) return;
+
+    let isMounted = true;
+
+    async function checkAndAutoRestore() {
+      try {
+        const isLocalSampleOnly =
+          notebooks.length <= 4 &&
+          notebooks.every((n) => INITIAL_NOTEBOOKS.some((init) => init.id === n.id));
+
+        if (isLocalSampleOnly && cloudAccount) {
+          setSyncInfo((prev) => ({ ...prev, status: 'syncing' }));
+          const remoteData = await gdrive.downloadLibraryFromDrive(cloudAccount);
+          if (isMounted && remoteData && remoteData.notebooks.length > 0) {
+            setNotebooks(remoteData.notebooks);
+            if (remoteData.folders && remoteData.folders.length > 0) {
+              setFolders(remoteData.folders);
+            }
+            setSyncInfo({
+              status: 'success',
+              lastSyncTime: Date.now(),
+              syncedFilesCount: remoteData.notebooks.length,
+            });
+          } else {
+            setSyncInfo((prev) => ({ ...prev, status: 'idle' }));
+          }
+        }
+      } catch (err) {
+        console.warn('Auto restore on startup failed:', err);
+        setSyncInfo((prev) => ({ ...prev, status: 'idle' }));
+      }
+    }
+
+    checkAndAutoRestore();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [cloudAccount]);
   const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [pdfLoadingName, setPdfLoadingName] = useState('');
