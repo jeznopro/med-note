@@ -12,91 +12,170 @@ if (typeof window !== 'undefined') {
   }
 }
 
-// Cache loaded PDF documents in memory
+// Cache loaded PDF documents & in-flight promises
 const pdfDocCache = new Map<string, pdfjsLib.PDFDocumentProxy>();
+const pdfDocPromiseCache = new Map<string, Promise<pdfjsLib.PDFDocumentProxy>>();
+
+// Cache loaded PDF page proxies (worker communication deduplication)
+const pageProxyCache = new Map<string, Promise<pdfjsLib.PDFPageProxy>>();
+
+// High-speed LRU memory cache for rendered PDF pages (instant tab switching & smooth scrolling)
+const renderedPageCache = new Map<string, HTMLCanvasElement>();
+const MAX_RENDERED_PAGES_CACHE = 24;
+
+// Active render tasks per target canvas
 const activeRenderTasks = new WeakMap<HTMLCanvasElement, { cancel: () => void }>();
+
+// Cancel active pdf.js render task on a specific canvas element
+export function cancelActiveRender(canvas: HTMLCanvasElement): void {
+  const existingTask = activeRenderTasks.get(canvas);
+  if (existingTask) {
+    try {
+      existingTask.cancel();
+    } catch {
+      // Ignore cancellation exceptions
+    }
+    activeRenderTasks.delete(canvas);
+  }
+}
+
+// Miniature thumbnail cache
 const thumbnailCache = new Map<string, string>();
+
+// Concurrency queue for background thumbnail generation (max 2 parallel renders)
+const MAX_CONCURRENT_THUMBNAILS = 2;
+let activeThumbnailCount = 0;
+const thumbnailQueue: Array<() => Promise<void>> = [];
+
+function runNextThumbnailTask() {
+  if (activeThumbnailCount >= MAX_CONCURRENT_THUMBNAILS || thumbnailQueue.length === 0) {
+    return;
+  }
+  const nextTask = thumbnailQueue.shift();
+  if (!nextTask) return;
+  activeThumbnailCount++;
+  nextTask().finally(() => {
+    activeThumbnailCount--;
+    runNextThumbnailTask();
+  });
+}
+
+function queueThumbnailTask(task: () => Promise<void>): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    thumbnailQueue.push(async () => {
+      try {
+        await task();
+        resolve();
+      } catch (e) {
+        reject(e);
+      }
+    });
+    runNextThumbnailTask();
+  });
+}
 
 export async function getPdfDocument(
   source: string | ArrayBuffer | Uint8Array,
   notebookId?: string
 ): Promise<pdfjsLib.PDFDocumentProxy> {
-  // 1. Check notebookId cache first if available
+  const primaryKey = notebookId || (typeof source === 'string' && source ? source : 'active_pdf_buffer');
+
+  // 1. Check resolved document cache
+  if (pdfDocCache.has(primaryKey)) {
+    return pdfDocCache.get(primaryKey)!;
+  }
   if (notebookId && pdfDocCache.has(notebookId)) {
     return pdfDocCache.get(notebookId)!;
   }
 
-  // 2. Check string/buffer cache key
-  const cacheKey = typeof source === 'string' && source ? source : notebookId || 'active_pdf_buffer';
-  if (pdfDocCache.has(cacheKey)) {
-    return pdfDocCache.get(cacheKey)!;
+  // 2. Check pending promise cache (deduplicates concurrent fetches!)
+  if (pdfDocPromiseCache.has(primaryKey)) {
+    return pdfDocPromiseCache.get(primaryKey)!;
+  }
+  if (notebookId && pdfDocPromiseCache.has(notebookId)) {
+    return pdfDocPromiseCache.get(notebookId)!;
   }
 
-  let binaryData: Uint8Array | null = null;
+  // 3. Initiate single loading promise
+  const loadPromise = (async () => {
+    let binaryData: Uint8Array | null = null;
 
-  if (source instanceof Uint8Array) {
-    binaryData = source;
-  } else if (source instanceof ArrayBuffer) {
-    binaryData = new Uint8Array(source);
-  } else if (typeof source === 'string' && source.startsWith('data:')) {
-    // Base64 data URL
-    const base64 = source.split(',')[1];
-    const binaryStr = atob(base64);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
-    binaryData = bytes;
-  } else if (typeof source === 'string' && source.startsWith('blob:')) {
-    // Test if blob URL is still alive
-    try {
-      const resp = await fetch(source, { method: 'HEAD' });
-      if (!resp.ok) {
-        throw new Error('Blob URL revoked');
+    if (source instanceof Uint8Array) {
+      binaryData = source;
+    } else if (source instanceof ArrayBuffer) {
+      binaryData = new Uint8Array(source);
+    } else if (typeof source === 'string' && source.startsWith('data:')) {
+      // Base64 data URL
+      const base64 = source.split(',')[1];
+      const binaryStr = atob(base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
       }
-    } catch {
-      // Blob URL revoked after refresh! Recover from IndexedDB if notebookId is known
-      if (notebookId) {
-        const storedBuffer = await getPdfBinary(notebookId);
-        if (storedBuffer) {
-          binaryData = new Uint8Array(storedBuffer);
+      binaryData = bytes;
+    } else if (typeof source === 'string' && source.startsWith('blob:')) {
+      // Test if blob URL is still alive
+      try {
+        const resp = await fetch(source, { method: 'HEAD' });
+        if (!resp.ok) {
+          throw new Error('Blob URL revoked');
+        }
+      } catch {
+        // Blob URL revoked after refresh! Recover from IndexedDB if notebookId is known
+        if (notebookId) {
+          const storedBuffer = await getPdfBinary(notebookId);
+          if (storedBuffer) {
+            binaryData = new Uint8Array(storedBuffer);
+          }
         }
       }
     }
-  }
 
-  // If still no binary data and we have notebookId, try IndexedDB
-  if (!binaryData && notebookId) {
-    const storedBuffer = await getPdfBinary(notebookId);
-    if (storedBuffer) {
-      binaryData = new Uint8Array(storedBuffer);
+    // If still no binary data and we have notebookId, try IndexedDB
+    if (!binaryData && notebookId) {
+      const storedBuffer = await getPdfBinary(notebookId);
+      if (storedBuffer) {
+        binaryData = new Uint8Array(storedBuffer);
+      }
     }
-  }
 
-  let loadingTask: pdfjsLib.PDFDocumentLoadingTask;
+    let loadingTask: pdfjsLib.PDFDocumentLoadingTask;
 
-  if (binaryData) {
-    loadingTask = pdfjsLib.getDocument({
-      data: binaryData,
-      cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
-      cMapPacked: true,
-    });
-  } else if (typeof source === 'string' && source) {
-    loadingTask = pdfjsLib.getDocument({
-      url: source,
-      cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
-      cMapPacked: true,
-    });
-  } else {
-    throw new Error('No PDF source or stored data found');
-  }
+    if (binaryData) {
+      loadingTask = pdfjsLib.getDocument({
+        data: binaryData,
+        cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
+        cMapPacked: true,
+      });
+    } else if (typeof source === 'string' && source) {
+      loadingTask = pdfjsLib.getDocument({
+        url: source,
+        cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
+        cMapPacked: true,
+      });
+    } else {
+      throw new Error('No PDF source or stored data found');
+    }
 
-  const pdfDoc = await loadingTask.promise;
-  pdfDocCache.set(cacheKey, pdfDoc);
+    const doc = await loadingTask.promise;
+    pdfDocCache.set(primaryKey, doc);
+    if (notebookId) {
+      pdfDocCache.set(notebookId, doc);
+    }
+    return doc;
+  })().finally(() => {
+    pdfDocPromiseCache.delete(primaryKey);
+    if (notebookId) {
+      pdfDocPromiseCache.delete(notebookId);
+    }
+  });
+
+  pdfDocPromiseCache.set(primaryKey, loadPromise);
   if (notebookId) {
-    pdfDocCache.set(notebookId, pdfDoc);
+    pdfDocPromiseCache.set(notebookId, loadPromise);
   }
-  return pdfDoc;
+
+  return loadPromise;
 }
 
 export async function renderPdfPageToContext(
@@ -105,24 +184,38 @@ export async function renderPdfPageToContext(
   canvas: HTMLCanvasElement,
   targetWidth: number,
   targetHeight: number,
-  dpr: number = 1
+  dpr: number = 1,
+  notebookId?: string
 ): Promise<void> {
   // Cancel previous render on this canvas if active
-  const existingTask = activeRenderTasks.get(canvas);
-  if (existingTask) {
-    try {
-      existingTask.cancel();
-    } catch {
-      // Ignore cancellation
+  cancelActiveRender(canvas);
+
+  const pixelWidth = Math.round(targetWidth * dpr);
+  const pixelHeight = Math.round(targetHeight * dpr);
+  const cacheKey = `${notebookId || 'pdf'}_p${pageNumber}_${pixelWidth}x${pixelHeight}`;
+
+  // Instant path: reuse cached rendered page offscreen canvas (0.1ms render!)
+  if (renderedPageCache.has(cacheKey)) {
+    const cachedCanvas = renderedPageCache.get(cacheKey)!;
+    const mainCtx = canvas.getContext('2d');
+    if (mainCtx) {
+      mainCtx.save();
+      mainCtx.setTransform(1, 0, 0, 1, 0, 0);
+      mainCtx.clearRect(0, 0, canvas.width, canvas.height);
+      mainCtx.drawImage(cachedCanvas, 0, 0);
+      mainCtx.restore();
     }
-    activeRenderTasks.delete(canvas);
+    return;
   }
 
   try {
-    const page = await pdfDoc.getPage(pageNumber);
-
-    const pixelWidth = Math.round(targetWidth * dpr);
-    const pixelHeight = Math.round(targetHeight * dpr);
+    const pageProxyKey = `${notebookId || 'doc'}_page_${pageNumber}`;
+    let pagePromise = pageProxyCache.get(pageProxyKey);
+    if (!pagePromise) {
+      pagePromise = pdfDoc.getPage(pageNumber);
+      pageProxyCache.set(pageProxyKey, pagePromise);
+    }
+    const page = await pagePromise;
 
     // Offscreen rendering to prevent canvas race conditions and flickering
     const offscreen = document.createElement('canvas');
@@ -162,6 +255,13 @@ export async function renderPdfPageToContext(
     await renderTask.promise;
     activeRenderTasks.delete(canvas);
 
+    // Save to high-speed LRU memory cache
+    if (renderedPageCache.size >= MAX_RENDERED_PAGES_CACHE) {
+      const oldestKey = renderedPageCache.keys().next().value;
+      if (oldestKey) renderedPageCache.delete(oldestKey);
+    }
+    renderedPageCache.set(cacheKey, offscreen);
+
     // Draw offscreen content directly onto the target canvas
     const mainCtx = canvas.getContext('2d');
     if (!mainCtx) return;
@@ -180,7 +280,7 @@ export async function renderPdfPageToContext(
   }
 }
 
-// Generate miniature thumbnail data URL for a specific PDF page
+// Generate miniature thumbnail data URL with concurrency limiting and cache
 export async function getPdfThumbnail(
   pdfDoc: pdfjsLib.PDFDocumentProxy,
   pageNumber: number,
@@ -192,37 +292,57 @@ export async function getPdfThumbnail(
     return thumbnailCache.get(thumbKey)!;
   }
 
-  try {
-    const page = await pdfDoc.getPage(pageNumber);
-    const unscaledViewport = page.getViewport({ scale: 1.0 });
-    const scale = thumbWidth / unscaledViewport.width;
-    const thumbHeight = Math.round(unscaledViewport.height * scale);
-    const viewport = page.getViewport({ scale });
+  return new Promise<string>((resolve) => {
+    queueThumbnailTask(async () => {
+      // Re-check cache in case it was resolved while queued
+      if (thumbnailCache.has(thumbKey)) {
+        resolve(thumbnailCache.get(thumbKey)!);
+        return;
+      }
 
-    const canvas = document.createElement('canvas');
-    canvas.width = thumbWidth;
-    canvas.height = thumbHeight;
-    const ctx = canvas.getContext('2d', { alpha: false });
-    if (!ctx) return '';
+      try {
+        const pageProxyKey = `${notebookId}_page_${pageNumber}`;
+        let pagePromise = pageProxyCache.get(pageProxyKey);
+        if (!pagePromise) {
+          pagePromise = pdfDoc.getPage(pageNumber);
+          pageProxyCache.set(pageProxyKey, pagePromise);
+        }
+        const page = await pagePromise;
 
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, thumbWidth, thumbHeight);
+        const unscaledViewport = page.getViewport({ scale: 1.0 });
+        const scale = thumbWidth / unscaledViewport.width;
+        const thumbHeight = Math.round(unscaledViewport.height * scale);
+        const viewport = page.getViewport({ scale });
 
-    const renderTask = (page as unknown as {
-      render: (ctx: unknown) => { promise: Promise<void> };
-    }).render({
-      canvasContext: ctx,
-      viewport,
+        const canvas = document.createElement('canvas');
+        canvas.width = thumbWidth;
+        canvas.height = thumbHeight;
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) {
+          resolve('');
+          return;
+        }
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, thumbWidth, thumbHeight);
+
+        const renderTask = (page as unknown as {
+          render: (ctx: unknown) => { promise: Promise<void> };
+        }).render({
+          canvasContext: ctx,
+          viewport,
+        });
+
+        await renderTask.promise;
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+        thumbnailCache.set(thumbKey, dataUrl);
+        resolve(dataUrl);
+      } catch (e) {
+        console.warn(`Failed to generate thumbnail for page ${pageNumber}:`, e);
+        resolve('');
+      }
     });
-
-    await renderTask.promise;
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-    thumbnailCache.set(thumbKey, dataUrl);
-    return dataUrl;
-  } catch (e) {
-    console.warn(`Failed to generate thumbnail for page ${pageNumber}:`, e);
-    return '';
-  }
+  });
 }
 
 export async function createNotebookFromPdf(file: File): Promise<Notebook> {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { Page } from '../../types/document';
 import { Plus, Trash2, Copy, FileText, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { getPdfDocument, getPdfThumbnail } from '../../pdf/pdfLoader';
@@ -25,10 +25,31 @@ const PageThumbnailItem: React.FC<{
   isDarkMode: boolean;
 }> = ({ page, index, notebookId, pdfDataUrl, isDarkMode }) => {
   const [thumbUrl, setThumbUrl] = useState<string>('');
+  const itemRef = useRef<HTMLDivElement | null>(null);
+  // Only first 5 thumbnails load immediately; others load when scrolled into view
+  const [isVisible, setIsVisible] = useState(() => index < 5);
+
+  useEffect(() => {
+    const el = itemRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '250px 0px 250px 0px' }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let isCancelled = false;
-    if (page.pdfPageNumber && (pdfDataUrl || notebookId)) {
+    if (isVisible && page.pdfPageNumber && (pdfDataUrl || notebookId)) {
       getPdfDocument(pdfDataUrl || '', notebookId)
         .then((doc) => {
           if (!isCancelled && page.pdfPageNumber) {
@@ -42,10 +63,11 @@ const PageThumbnailItem: React.FC<{
     return () => {
       isCancelled = true;
     };
-  }, [page.pdfPageNumber, notebookId, pdfDataUrl]);
+  }, [isVisible, page.pdfPageNumber, notebookId, pdfDataUrl]);
 
   return (
     <div
+      ref={itemRef}
       className={`w-full aspect-[1/1.414] rounded-md border flex items-center justify-center relative overflow-hidden ${
         isDarkMode ? 'bg-zinc-900 border-zinc-700' : 'bg-white border-slate-200 shadow-2xs'
       }`}

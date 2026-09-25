@@ -4,7 +4,7 @@ import type { ToolState } from '../../types/tools';
 import { generateStrokeOutline, drawOutline, isStrokeIntersectingPoint } from '../../engine/stroke';
 import { renderPageBackground } from '../../engine/pageTemplate';
 import { PageHistory } from '../../engine/history';
-import { getPdfDocument, renderPdfPageToContext } from '../../pdf/pdfLoader';
+import { getPdfDocument, renderPdfPageToContext, cancelActiveRender } from '../../pdf/pdfLoader';
 import { Plus, Sparkles, ArrowRight } from 'lucide-react';
 
 interface NoteCanvasProps {
@@ -36,7 +36,8 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
 }) => {
   const [showAutoPageToast, setShowAutoPageToast] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [isInViewport, setIsInViewport] = useState(true);
+  // Only first 2 pages initialize active; subsequent pages wait for viewport intersection
+  const [isInViewport, setIsInViewport] = useState(() => (page.pageNumber ?? 1) <= 2);
 
   const bgCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const inkCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -51,7 +52,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
   const { width, height, template, strokes, pdfPageNumber } = page;
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 
-  // Viewport intersection observer to prioritize visible canvas rendering
+  // Viewport intersection observer with generous threshold for pre-rendering
   useEffect(() => {
     const el = containerRef.current;
     if (!el || typeof IntersectionObserver === 'undefined') return;
@@ -61,7 +62,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
         const entry = entries[0];
         setIsInViewport(entry.isIntersecting);
       },
-      { rootMargin: '600px 0px 600px 0px' }
+      { rootMargin: '800px 0px 800px 0px' }
     );
 
     observer.observe(el);
@@ -77,7 +78,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     if (pdfPageNumber && (pdfDataUrl || notebookId)) {
       try {
         const pdfDoc = await getPdfDocument(pdfDataUrl || '', notebookId);
-        await renderPdfPageToContext(pdfDoc, pdfPageNumber, canvas, width, height, dpr);
+        await renderPdfPageToContext(pdfDoc, pdfPageNumber, canvas, width, height, dpr, notebookId);
       } catch (err) {
         console.error('Failed to render PDF page on canvas:', err);
         const ctx = canvas.getContext('2d');
@@ -105,6 +106,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
 
   // 2. Redraw Committed Ink Layer (Highlighters then Pens)
   const redrawInk = useCallback(() => {
+    if (!isInViewport) return;
     const canvas = inkCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -132,15 +134,19 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     }
 
     ctx.restore();
-  }, [strokes, width, height, dpr]);
+  }, [strokes, width, height, dpr, isInViewport]);
 
+  // Handle render cancellation when moving out of viewport, or re-render when entering
   useEffect(() => {
-    redrawBackground();
-  }, [redrawBackground]);
-
-  useEffect(() => {
-    redrawInk();
-  }, [redrawInk]);
+    if (!isInViewport) {
+      if (bgCanvasRef.current) {
+        cancelActiveRender(bgCanvasRef.current);
+      }
+    } else {
+      redrawBackground();
+      redrawInk();
+    }
+  }, [isInViewport, redrawBackground, redrawInk]);
 
   // Transform client coordinates to page canvas space
   const getCanvasPointFromEvent = useCallback(

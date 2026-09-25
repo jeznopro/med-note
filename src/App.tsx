@@ -16,6 +16,7 @@ import { PageHistory } from './engine/history';
 import { TopToolbar } from './components/Toolbar/TopToolbar';
 import { PageSidebar } from './components/Sidebar/PageSidebar';
 import { NoteCanvas } from './components/Canvas/NoteCanvas';
+import { VirtualContinuousPage } from './components/Canvas/VirtualContinuousPage';
 import { DocumentLibrary } from './components/Library/DocumentLibrary';
 import { createNotebookFromPdf } from './pdf/pdfLoader';
 import { exportNotebookAsPdf, exportCurrentPageAsPng, generateNotebookPdfBlob } from './pdf/pdfExporter';
@@ -380,8 +381,12 @@ export default function App() {
     } catch {}
   }, [isDarkMode]);
 
+  // Track whether active document has pending unsaved user edits
+  const hasUnsavedChangesRef = useRef(false);
+
   // Handle Notebook & Page Changes in Editor
   const handlePageChange = (updatedPage: Page) => {
+    hasUnsavedChangesRef.current = true;
     setNotebooks((prev) =>
       prev.map((nb) => {
         if (nb.id !== activeNotebookId) return nb;
@@ -397,6 +402,7 @@ export default function App() {
   };
 
   const handleSpecificPageChange = (pageIndex: number, updatedPage: Page) => {
+    hasUnsavedChangesRef.current = true;
     setNotebooks((prev) =>
       prev.map((nb) => {
         if (nb.id !== activeNotebookId) return nb;
@@ -411,18 +417,18 @@ export default function App() {
     );
   };
 
-  // Google Drive Auto-Sync Debounce (3s after user finishes writing/modifying)
+  // Google Drive Auto-Sync Debounce (only triggers if user actually modified the document)
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!cloudAccount || !autoSyncEnabled) return;
+    if (!cloudAccount || !autoSyncEnabled || !hasUnsavedChangesRef.current) return;
 
     if (syncTimeoutRef.current) {
       clearTimeout(syncTimeoutRef.current);
     }
 
     syncTimeoutRef.current = setTimeout(async () => {
-      if (!activeNotebook) return;
+      if (!activeNotebook || !hasUnsavedChangesRef.current) return;
       setSyncInfo((prev) => ({ ...prev, status: 'syncing' }));
       try {
         let pdfBlob: Blob | undefined;
@@ -433,6 +439,7 @@ export default function App() {
         }
         const folderName = activeNotebook.folderId ? folders.find((f) => f.id === activeNotebook.folderId)?.name : undefined;
         await gdrive.uploadNotebook(activeNotebook, cloudAccount, pdfBlob, folderName);
+        hasUnsavedChangesRef.current = false;
         setSyncInfo({
           status: 'success',
           lastSyncTime: Date.now(),
@@ -622,6 +629,7 @@ export default function App() {
   const isLastPage = activeNotebook.currentPageIndex >= activeNotebook.pages.length - 1;
 
   const handleAutoAddNewPage = (navigateNow: boolean = false) => {
+    hasUnsavedChangesRef.current = true;
     const newPage = createInitialPage(activeNotebook.pages.length + 1, currentPage.template);
     setNotebooks((prev) =>
       prev.map((nb) =>
@@ -655,6 +663,7 @@ export default function App() {
   };
 
   const handleDuplicatePage = (index: number) => {
+    hasUnsavedChangesRef.current = true;
     const pageToDup = activeNotebook.pages[index];
     const newPage: Page = {
       ...pageToDup,
@@ -679,6 +688,7 @@ export default function App() {
 
   const handleDeletePage = (index: number) => {
     if (activeNotebook.pages.length <= 1) return;
+    hasUnsavedChangesRef.current = true;
     setNotebooks((prev) =>
       prev.map((nb) => {
         if (nb.id !== activeNotebookId) return nb;
@@ -695,6 +705,7 @@ export default function App() {
   };
 
   const handleTemplateChange = (template: PageTemplate) => {
+    hasUnsavedChangesRef.current = true;
     handlePageChange({
       ...currentPage,
       template,
@@ -703,6 +714,7 @@ export default function App() {
 
   const handleClearPage = () => {
     if (currentPage.strokes.length === 0) return;
+    hasUnsavedChangesRef.current = true;
     currentHistory.push({
       type: 'CLEAR_PAGE',
       previousStrokes: [...currentPage.strokes],
@@ -716,6 +728,7 @@ export default function App() {
 
   // Document Library & Tab Navigation Handlers
   const handleOpenNotebook = (notebook: Notebook) => {
+    hasUnsavedChangesRef.current = false;
     if (!openNotebookIds.includes(notebook.id)) {
       setOpenNotebookIds((prev) => [...prev, notebook.id]);
     }
@@ -1199,37 +1212,32 @@ export default function App() {
               {scrollMode === 'continuous' ? (
                 <div className="w-fit min-w-full flex flex-col items-center gap-8 py-8 pb-36 min-h-full">
                   {activeNotebook.pages.map((p, idx) => (
-                    <div
+                    <VirtualContinuousPage
                       key={p.id}
-                      id={`page-container-${idx}`}
-                      className="relative flex flex-col items-center"
-                      onClick={() => {
-                        if (activeNotebook.currentPageIndex !== idx) {
+                      page={p}
+                      index={idx}
+                      total={activeNotebook.pages.length}
+                      isActive={activeNotebook.currentPageIndex === idx}
+                      notebookId={activeNotebook.id}
+                      pdfDataUrl={activeNotebook.pdfDataUrl}
+                      toolState={toolState}
+                      transform={transform}
+                      isDarkMode={isDarkMode}
+                      history={getPageHistory(p.id)}
+                      onPageChange={(updatedPage) => handleSpecificPageChange(idx, updatedPage)}
+                      onHistoryChange={notifyHistoryChange}
+                      isLastPage={idx === activeNotebook.pages.length - 1}
+                      onAutoAddNewPage={handleAutoAddNewPage}
+                      onSelectPage={(index) => {
+                        if (activeNotebook.currentPageIndex !== index) {
                           setNotebooks((prev) =>
                             prev.map((nb) =>
-                              nb.id === activeNotebookId ? { ...nb, currentPageIndex: idx } : nb
+                              nb.id === activeNotebookId ? { ...nb, currentPageIndex: index } : nb
                             )
                           );
                         }
                       }}
-                    >
-                      <div className="text-[11px] font-mono text-slate-400 font-semibold mb-1 select-none">
-                        Trang {idx + 1} / {activeNotebook.pages.length}
-                      </div>
-                      <NoteCanvas
-                        page={p}
-                        notebookId={activeNotebook.id}
-                        pdfDataUrl={activeNotebook.pdfDataUrl}
-                        toolState={toolState}
-                        transform={transform}
-                        isDarkMode={isDarkMode}
-                        history={getPageHistory(p.id)}
-                        onPageChange={(updatedPage) => handleSpecificPageChange(idx, updatedPage)}
-                        onHistoryChange={notifyHistoryChange}
-                        isLastPage={idx === activeNotebook.pages.length - 1}
-                        onAutoAddNewPage={handleAutoAddNewPage}
-                      />
-                    </div>
+                    />
                   ))}
                 </div>
               ) : (
