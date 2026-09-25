@@ -29,7 +29,31 @@ export const LibraryBackground: React.FC<LibraryBackgroundProps> = ({
   isDarkMode,
 }) => {
   if (config.type === 'default') {
-    return null;
+    return (
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+        <div
+          className={`absolute inset-0 transition-colors duration-700 ${
+            isDarkMode ? 'bg-zinc-950' : 'bg-slate-100'
+          }`}
+        />
+        {/* Soft atmospheric ambient glowing mesh orbs for Apple frosted glass effect */}
+        <div
+          className={`absolute -top-40 -left-40 w-[36rem] h-[36rem] rounded-full blur-3xl opacity-60 transition-all duration-700 ${
+            isDarkMode ? 'bg-indigo-950/70' : 'bg-blue-200/70'
+          }`}
+        />
+        <div
+          className={`absolute top-1/4 -right-40 w-[32rem] h-[32rem] rounded-full blur-3xl opacity-50 transition-all duration-700 ${
+            isDarkMode ? 'bg-purple-950/60' : 'bg-indigo-200/60'
+          }`}
+        />
+        <div
+          className={`absolute -bottom-40 left-1/3 w-[36rem] h-[36rem] rounded-full blur-3xl opacity-50 transition-all duration-700 ${
+            isDarkMode ? 'bg-sky-950/50' : 'bg-teal-200/50'
+          }`}
+        />
+      </div>
+    );
   }
 
   // Determine background content

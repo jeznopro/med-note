@@ -214,10 +214,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
   return (
     <div
-      className={`h-screen w-screen flex select-none overflow-hidden font-sans ${
+      className={`h-screen w-screen flex select-none overflow-hidden font-sans relative ${
         isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-[#F7F8FA] text-slate-800'
       }`}
     >
+      {/* Full-window Ambient / Dynamic Wallpaper behind both sidebar and documents */}
+      <LibraryBackground config={wallpaperConfig} isDarkMode={isDarkMode} />
+
       {/* Individual or Multiple PDF File Upload */}
       <input
         ref={fileInputRef}
@@ -240,16 +243,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         onChange={handleFolderChange}
       />
 
-      {/* 1. Left Sidebar (GoodNotes Clean White/Light Sidebar) */}
-      <aside
-        className={`w-60 border-r flex flex-col shrink-0 transition-colors ${
-          isDarkMode
-            ? 'bg-zinc-900 border-zinc-800 text-zinc-300'
-            : 'bg-white border-slate-200 text-slate-700 shadow-2xs'
-        }`}
-      >
+      {/* 1. Left Sidebar (Apple Frosted Glass / Glassmorphism) */}
+      <aside className="w-60 border-r flex flex-col shrink-0 transition-colors relative z-10 backdrop-blur-2xl bg-white/60 dark:bg-zinc-950/60 border-slate-200/60 dark:border-white/10 text-slate-700 dark:text-zinc-200 shadow-lg shadow-black/5">
         {/* macOS Window Controls (Traffic Lights: Red, Yellow, Green) & Dark Mode Toggle */}
-        <div className="h-12 px-4 flex items-center justify-between border-b border-slate-100 dark:border-zinc-800">
+        <div className="h-12 px-4 flex items-center justify-between border-b border-slate-200/40 dark:border-white/10">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-[#FF5F56] border border-[#E0443E]" />
             <div className="w-3 h-3 rounded-full bg-[#FFBD2E] border border-[#DEA123]" />
@@ -260,7 +257,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           {onToggleDarkMode && (
             <button
               onClick={onToggleDarkMode}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer transition-colors backdrop-blur-md"
               title={isDarkMode ? 'Chuyển sang chế độ Sáng' : 'Chuyển sang chế độ Tối'}
             >
               {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-slate-500" />}
@@ -270,40 +267,32 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
         {/* macOS Pill Search Box */}
         <div className="px-3 pt-3 pb-2">
-          <div
-            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs ${
-              isDarkMode
-                ? 'bg-zinc-800/80 border-zinc-700 text-zinc-200'
-                : 'bg-slate-50 border-slate-200 text-slate-700'
-            }`}
-          >
-            <Search className="w-3.5 h-3.5 text-slate-400" />
+          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs backdrop-blur-md bg-black/5 dark:bg-white/5 border-slate-300/40 dark:border-white/10 text-slate-700 dark:text-zinc-200 focus-within:ring-2 focus-within:ring-blue-500/30 transition-all">
+            <Search className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search"
-              className="bg-transparent border-none outline-hidden w-full text-xs placeholder:text-slate-400"
+              className="bg-transparent border-none outline-hidden w-full text-xs placeholder:text-slate-400 dark:placeholder:text-zinc-400"
             />
           </div>
         </div>
 
-        {/* Sidebar Navigation Items (Matching Image 1) */}
+        {/* Sidebar Navigation Items */}
         <div className="px-2 py-1 space-y-1 text-xs font-medium">
           <button
             onClick={() => {
               setNavFilter('all');
               onSelectFolder(null);
             }}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors cursor-pointer ${
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all cursor-pointer backdrop-blur-md ${
               navFilter === 'all' && !currentFolderId
-                ? isDarkMode
-                  ? 'bg-zinc-800 text-white font-semibold'
-                  : 'bg-blue-50 text-blue-700 font-bold border border-blue-100 shadow-2xs'
-                : 'hover:bg-slate-100 text-slate-600 dark:text-zinc-400'
+                ? 'bg-blue-500/20 text-blue-700 dark:text-blue-300 font-bold border border-blue-500/30 shadow-xs'
+                : 'hover:bg-black/5 dark:hover:bg-white/10 text-slate-600 dark:text-zinc-300 border border-transparent'
             }`}
           >
-            <LayoutGrid className="w-4 h-4 text-blue-600" />
+            <LayoutGrid className="w-4 h-4 text-blue-600 dark:text-blue-400" />
             <span>Documents</span>
             <span className="ml-auto text-[11px] opacity-60 font-mono">{notebooks.length}</span>
           </button>
@@ -313,12 +302,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               setNavFilter('favorites');
               onSelectFolder(null);
             }}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors cursor-pointer ${
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all cursor-pointer backdrop-blur-md ${
               navFilter === 'favorites'
-                ? isDarkMode
-                  ? 'bg-zinc-800 text-white font-semibold'
-                  : 'bg-amber-50 text-amber-700 font-bold border border-amber-100 shadow-2xs'
-                : 'hover:bg-slate-100 text-slate-600 dark:text-zinc-400'
+                ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold border border-amber-500/30 shadow-xs'
+                : 'hover:bg-black/5 dark:hover:bg-white/10 text-slate-600 dark:text-zinc-300 border border-transparent'
             }`}
           >
             <Bookmark className="w-4 h-4 text-amber-500" />
@@ -336,7 +323,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           </span>
           <button
             onClick={() => setIsCreatingFolder(true)}
-            className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 cursor-pointer"
+            className="p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 cursor-pointer transition-colors"
             title="Tạo thư mục môn học mới"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -355,12 +342,12 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                   setNavFilter('all');
                   onSelectFolder(folder.id);
                 }}
-                className={`group flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                className={`group flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer transition-colors backdrop-blur-md ${
                   isSelected
                     ? isDarkMode
-                      ? 'bg-zinc-800 text-white font-semibold'
-                      : 'bg-[#DDE1E6] text-slate-900 font-semibold'
-                    : 'hover:bg-black/5 dark:hover:bg-white/5 text-slate-600 dark:text-zinc-400'
+                      ? 'bg-white/15 text-white font-semibold border border-white/10'
+                      : 'bg-black/10 text-slate-950 font-semibold border border-black/5'
+                    : 'hover:bg-black/5 dark:hover:bg-white/10 text-slate-600 dark:text-zinc-300 border border-transparent'
                 }`}
               >
                 <div className="flex items-center gap-2 truncate">
@@ -386,13 +373,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         </div>
 
         {/* Footer Google Drive Login / Sync Widget */}
-        <div className="p-3 border-t border-black/5 dark:border-white/5 space-y-2">
+        <div className="p-3 border-t border-slate-200/40 dark:border-white/10 space-y-2">
           <button
             onClick={onOpenCloudSettings}
-            className={`w-full flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all shadow-2xs group ${
+            className={`w-full flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all backdrop-blur-xl shadow-xs group ${
               isCloudConnected
-                ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
-                : 'bg-blue-50/90 dark:bg-zinc-800 border-blue-200 dark:border-zinc-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100'
+                ? 'bg-emerald-500/15 dark:bg-emerald-950/40 border-emerald-500/30 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/25'
+                : 'bg-white/60 dark:bg-white/5 border-slate-300/40 dark:border-white/10 text-blue-700 dark:text-blue-300 hover:bg-white/80 dark:hover:bg-white/10'
             }`}
           >
             <div className="flex items-center gap-2 truncate">
@@ -409,24 +396,21 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             {isCloudConnected ? (
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
             ) : (
-              <span className="text-[10px] text-blue-600 font-bold shrink-0">Vào →</span>
+              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold shrink-0">Vào →</span>
             )}
           </button>
 
           <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-zinc-500 px-1">
             <span>GoodNotes Engine</span>
-            <span className="px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-600 font-bold">v2.0</span>
+            <span className="px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold">v2.0</span>
           </div>
         </div>
       </aside>
 
-      {/* 2. Main Content Area (Documents Grid - Exactly matching Image 1) */}
-      <main className="flex-1 flex flex-col overflow-hidden relative">
-        {/* Dynamic & Static Wallpaper Engine */}
-        <LibraryBackground config={wallpaperConfig} isDarkMode={isDarkMode} />
-
-        {/* Main Content Header */}
-        <header className="h-16 px-8 flex items-center justify-between border-b border-slate-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 backdrop-blur-md relative z-10">
+      {/* 2. Main Content Area (Documents Grid) */}
+      <main className="flex-1 flex flex-col overflow-hidden relative z-10">
+        {/* Main Content Header with Frosted Glass Blur */}
+        <header className="h-16 px-8 flex items-center justify-between border-b backdrop-blur-2xl transition-all relative z-10 bg-white/60 dark:bg-zinc-950/60 border-slate-200/60 dark:border-white/10 shadow-xs">
           {/* Header Title (Image 1 Style: Bold "Documents") */}
           <div className="flex items-center gap-3">
             {currentFolderId ? (
@@ -447,34 +431,28 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             )}
           </div>
 
-          {/* Center / Right Header Controls: [ Date ] [ Name ] Segmented Control (Image 1 replica) */}
-          <div className="flex items-center gap-4">
+          {/* Center / Right Header Controls: [ Date ] [ Name ] Segmented Control */}
+          <div className="flex items-center gap-3">
             {/* Pill Segmented Control [ Date ] [ Name ] */}
             <div
-              className={`flex items-center p-0.5 rounded-md border text-xs font-semibold ${
-                isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-[#EAECEF] border-[#DFE2E6]'
-              }`}
+              className="flex items-center p-0.5 rounded-lg border text-xs font-semibold backdrop-blur-xl bg-black/5 dark:bg-white/5 border-slate-300/40 dark:border-white/10"
             >
               <button
                 onClick={() => setSortBy('date')}
-                className={`px-3 py-1 rounded-sm transition-all cursor-pointer ${
+                className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
                   sortBy === 'date'
-                    ? isDarkMode
-                      ? 'bg-zinc-800 text-white shadow-2xs'
-                      : 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
+                    ? 'bg-white/80 dark:bg-white/20 text-slate-900 dark:text-white shadow-xs backdrop-blur-md font-bold'
+                    : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 Date
               </button>
               <button
                 onClick={() => setSortBy('name')}
-                className={`px-3 py-1 rounded-sm transition-all cursor-pointer ${
+                className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
                   sortBy === 'name'
-                    ? isDarkMode
-                      ? 'bg-zinc-800 text-white shadow-2xs'
-                      : 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
+                    ? 'bg-white/80 dark:bg-white/20 text-slate-900 dark:text-white shadow-xs backdrop-blur-md font-bold'
+                    : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 Name
@@ -484,10 +462,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             {/* Google Drive Login / Auto-Sync Button */}
             <button
               onClick={onOpenCloudSettings}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-all shadow-2xs group ${
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-all backdrop-blur-xl shadow-xs group ${
                 isCloudConnected
-                  ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/90 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
-                  : 'border-blue-200 dark:border-zinc-700 bg-blue-50/90 dark:bg-zinc-800 hover:bg-blue-100 text-blue-700 dark:text-blue-400'
+                  ? 'border-emerald-500/30 bg-emerald-500/15 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/25'
+                  : 'border-slate-300/40 dark:border-white/10 bg-white/60 dark:bg-white/5 hover:bg-white/80 dark:hover:bg-white/10 text-blue-700 dark:text-blue-300'
               }`}
               title={
                 isCloudConnected
@@ -515,7 +493,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             {/* Quick New Notebook Button */}
             <button
               onClick={() => setIsNewNotebookModalOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs cursor-pointer transition-colors"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600/90 hover:bg-blue-600 text-white text-xs font-semibold shadow-xs cursor-pointer transition-all backdrop-blur-md border border-blue-500/30 hover:scale-102"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tạo sổ tay</span>
@@ -524,7 +502,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             {/* Import PDF Button */}
             <button
               onClick={handlePdfUploadClick}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 text-xs font-medium text-slate-700 dark:text-zinc-300 cursor-pointer transition-colors shadow-2xs"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-slate-300/40 dark:border-white/10 bg-white/60 dark:bg-white/5 hover:bg-white/80 dark:hover:bg-white/10 text-xs font-semibold text-slate-700 dark:text-zinc-200 cursor-pointer transition-all backdrop-blur-xl shadow-xs"
               title="Nhập 1 hoặc nhiều tài liệu PDF"
             >
               <Upload className="w-3.5 h-3.5 text-blue-500" />
@@ -534,7 +512,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             {/* Import Folder Button */}
             <button
               onClick={handleFolderUploadClick}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/80 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-semibold text-indigo-700 dark:text-indigo-300 cursor-pointer transition-colors shadow-2xs"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-indigo-400/30 dark:border-indigo-500/30 bg-indigo-500/15 dark:bg-indigo-950/40 hover:bg-indigo-500/25 text-xs font-semibold text-indigo-700 dark:text-indigo-300 cursor-pointer transition-all backdrop-blur-xl shadow-xs"
               title="Nhập toàn bộ thư mục chứa các file PDF từ máy tính"
             >
               <FolderUp className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
@@ -544,7 +522,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             {/* Wallpaper Button */}
             <button
               onClick={() => setIsWallpaperModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-purple-200 dark:border-purple-900/60 bg-purple-50/80 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-xs font-semibold text-purple-700 dark:text-purple-300 cursor-pointer transition-colors shadow-2xs"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-purple-400/30 dark:border-purple-500/30 bg-purple-500/15 dark:bg-purple-950/40 hover:bg-purple-500/25 text-xs font-semibold text-purple-700 dark:text-purple-300 cursor-pointer transition-all backdrop-blur-xl shadow-xs"
               title="Cài đặt hình nền động hoặc ảnh tĩnh cho trang chủ"
             >
               <Palette className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
@@ -555,7 +533,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             {onToggleDarkMode && (
               <button
                 onClick={onToggleDarkMode}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 text-xs font-semibold text-slate-700 dark:text-zinc-300 cursor-pointer transition-colors shadow-2xs"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-slate-300/40 dark:border-white/10 bg-white/60 dark:bg-white/5 hover:bg-white/80 dark:hover:bg-white/10 text-xs font-semibold text-slate-700 dark:text-zinc-200 cursor-pointer transition-all backdrop-blur-xl shadow-xs"
                 title={isDarkMode ? 'Chuyển sang chế độ Sáng' : 'Chuyển sang chế độ Tối'}
               >
                 {isDarkMode ? (
@@ -603,18 +581,14 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               {/* Popover Menu for [ + ] New */}
               {showNewMenu && (
                 <div
-                  className={`absolute top-full left-0 mt-2 p-1.5 rounded-xl border shadow-2xl z-50 w-52 ${
-                    isDarkMode
-                      ? 'bg-zinc-900 border-zinc-700 text-zinc-200'
-                      : 'bg-white border-slate-200 text-slate-800'
-                  }`}
+                  className="absolute top-full left-0 mt-2 p-1.5 rounded-xl border shadow-2xl z-50 w-52 backdrop-blur-2xl bg-white/85 dark:bg-zinc-900/85 border-slate-200/80 dark:border-white/10 text-slate-800 dark:text-zinc-100"
                 >
                   <button
                     onClick={() => {
                       setShowNewMenu(false);
                       setIsNewNotebookModalOpen(true);
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-left"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer text-left transition-colors"
                   >
                     <BookOpen className="w-4 h-4 text-blue-500" />
                     <div>
@@ -625,7 +599,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
                   <button
                     onClick={handlePdfUploadClick}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-left"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer text-left transition-colors"
                   >
                     <Upload className="w-4 h-4 text-emerald-500" />
                     <div>
@@ -636,7 +610,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
                   <button
                     onClick={handleFolderUploadClick}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-left"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer text-left transition-colors"
                   >
                     <FolderUp className="w-4 h-4 text-indigo-500" />
                     <div>
@@ -650,7 +624,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                       setIsCreatingFolder(true);
                       setShowNewMenu(false);
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-left"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer text-left transition-colors"
                   >
                     <FolderIcon className="w-4 h-4 text-amber-500" />
                     <div>
@@ -758,18 +732,14 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                     {activeFolderMenuId === folder.id && (
                       <div
                         onClick={(e) => e.stopPropagation()}
-                        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 p-1.5 rounded-xl border shadow-2xl z-50 w-48 text-left ${
-                          isDarkMode
-                            ? 'bg-zinc-900 border-zinc-700 text-zinc-200'
-                            : 'bg-white border-slate-200 text-slate-800'
-                        }`}
+                        className="absolute top-full left-1/2 -translate-x-1/2 mt-1 p-1.5 rounded-xl border shadow-2xl z-50 w-48 text-left backdrop-blur-2xl bg-white/85 dark:bg-zinc-900/85 border-slate-200/80 dark:border-white/10 text-slate-800 dark:text-zinc-100"
                       >
                         <button
                           onClick={() => {
                             setEditingFolder(folder);
                             setActiveFolderMenuId(null);
                           }}
-                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-blue-600 dark:text-blue-400 font-medium"
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer text-blue-600 dark:text-blue-400 font-medium transition-colors"
                         >
                           <Palette className="w-3.5 h-3.5" />
                           <span>Đổi màu & icon...</span>
@@ -783,7 +753,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                             }
                             setActiveFolderMenuId(null);
                           }}
-                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer transition-colors"
                         >
                           <Edit2 className="w-3.5 h-3.5 text-slate-400" />
                           <span>Đổi tên thư mục</span>
@@ -796,7 +766,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                             }
                             setActiveFolderMenuId(null);
                           }}
-                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-red-50 dark:hover:bg-red-950/50 text-red-500 cursor-pointer"
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-red-500/10 text-red-500 cursor-pointer transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Xóa thư mục</span>
@@ -1008,18 +978,14 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                     {activeMenuId === nb.id && (
                       <div
                         onClick={(e) => e.stopPropagation()}
-                        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 p-1.5 rounded-xl border shadow-2xl z-50 w-52 text-left ${
-                          isDarkMode
-                            ? 'bg-zinc-900 border-zinc-700 text-zinc-200'
-                            : 'bg-white border-slate-200 text-slate-800'
-                        }`}
+                        className="absolute top-full left-1/2 -translate-x-1/2 mt-1 p-1.5 rounded-xl border shadow-2xl z-50 w-52 text-left backdrop-blur-2xl bg-white/85 dark:bg-zinc-900/85 border-slate-200/80 dark:border-white/10 text-slate-800 dark:text-zinc-100"
                       >
                         <button
                           onClick={() => {
                             setEditingCoverNotebook(nb);
                             setActiveMenuId(null);
                           }}
-                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-indigo-600 dark:text-indigo-400 font-semibold"
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer text-indigo-600 dark:text-indigo-400 font-semibold transition-colors"
                         >
                           <Palette className="w-3.5 h-3.5" />
                           <span>Đổi bìa sổ tay...</span>
@@ -1031,7 +997,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                             setNewTitleInput(nb.title);
                             setActiveMenuId(null);
                           }}
-                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer transition-colors"
                         >
                           <Edit2 className="w-3.5 h-3.5 text-slate-400" />
                           <span>Đổi tên</span>
@@ -1042,7 +1008,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                             onDuplicateNotebook(nb.id);
                             setActiveMenuId(null);
                           }}
-                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer transition-colors"
                         >
                           <Copy className="w-3.5 h-3.5 text-slate-400" />
                           <span>Nhân bản</span>
@@ -1053,7 +1019,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                             exportNotebookAsPdf(nb, isDarkMode);
                             setActiveMenuId(null);
                           }}
-                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer transition-colors"
                         >
                           <Download className="w-3.5 h-3.5 text-blue-500" />
                           <span>Xuất ra PDF</span>
@@ -1061,7 +1027,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
                         {/* Move to folder */}
                         {onMoveNotebook && folders.length > 0 && (
-                          <div className="py-1 border-t border-slate-100 dark:border-zinc-800 my-1">
+                          <div className="py-1 border-t border-slate-200/40 dark:border-white/10 my-1">
                             <div className="text-[10px] text-zinc-400 font-semibold px-2 py-0.5">
                               Chuyển vào thư mục:
                             </div>
@@ -1072,7 +1038,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                                     onMoveNotebook(nb.id, null);
                                     setActiveMenuId(null);
                                   }}
-                                  className="w-full text-left px-2 py-1 rounded text-[11px] text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-1.5 cursor-pointer"
+                                  className="w-full text-left px-2 py-1 rounded text-[11px] text-slate-600 dark:text-zinc-400 hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-1.5 cursor-pointer transition-colors"
                                 >
                                   <span>🏠 Ngoài Documents (Gốc)</span>
                                 </button>
@@ -1085,10 +1051,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                                     onMoveNotebook(nb.id, f.id);
                                     setActiveMenuId(null);
                                   }}
-                                  className={`w-full text-left px-2 py-1 rounded text-[11px] flex items-center gap-1.5 truncate ${
+                                  className={`w-full text-left px-2 py-1 rounded text-[11px] flex items-center gap-1.5 truncate transition-colors ${
                                     nb.folderId === f.id
-                                      ? 'text-blue-600 font-bold bg-blue-50 dark:bg-blue-950/40'
-                                      : 'text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer'
+                                      ? 'text-blue-600 font-bold bg-blue-500/10'
+                                      : 'text-slate-700 dark:text-zinc-300 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer'
                                   }`}
                                 >
                                   <FolderIcon className="w-3 h-3 text-blue-400 shrink-0" />
@@ -1099,7 +1065,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                           </div>
                         )}
 
-                        <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1" />
+                        <div className="h-px bg-slate-200/40 dark:border-white/10 my-1" />
 
                         <button
                           onClick={() => {
@@ -1112,7 +1078,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                             }
                             setActiveMenuId(null);
                           }}
-                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-red-50 dark:hover:bg-red-950/50 text-red-500 cursor-pointer"
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-red-500/10 text-red-500 cursor-pointer transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Xóa sổ tay</span>
@@ -1139,11 +1105,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
       {/* Rename Dialog Modal */}
       {isRenaming && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-md flex items-center justify-center z-50">
           <div
-            className={`p-5 rounded-2xl border shadow-2xl w-80 ${
-              isDarkMode ? 'bg-zinc-900 border-zinc-700 text-zinc-100' : 'bg-white border-slate-200'
-            }`}
+            className="p-5 rounded-2xl border shadow-2xl w-80 backdrop-blur-2xl bg-white/90 dark:bg-zinc-900/90 border-slate-200/80 dark:border-white/10 text-slate-900 dark:text-zinc-100"
           >
             <h3 className="text-sm font-bold mb-3">Đổi tên tài liệu</h3>
             <input
@@ -1151,14 +1115,14 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               value={newTitleInput}
               onChange={(e) => setNewTitleInput(e.target.value)}
               className={`w-full px-3 py-2 rounded-xl border text-xs outline-hidden mb-4 ${
-                isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-slate-50 border-slate-200'
+                isDarkMode ? 'bg-zinc-800/80 border-zinc-700' : 'bg-slate-50 border-slate-200'
               }`}
               autoFocus
             />
             <div className="flex justify-end gap-2 text-xs">
               <button
                 onClick={() => setIsRenaming(null)}
-                className="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 cursor-pointer"
+                className="px-3 py-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-slate-500 cursor-pointer transition-colors"
               >
                 Hủy
               </button>
@@ -1169,7 +1133,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                   }
                   setIsRenaming(null);
                 }}
-                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 cursor-pointer"
+                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 cursor-pointer transition-colors"
               >
                 Lưu
               </button>
@@ -1180,11 +1144,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
       {/* New Folder Modal */}
       {isCreatingFolder && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-md flex items-center justify-center z-50">
           <div
-            className={`p-5 rounded-2xl border shadow-2xl w-80 ${
-              isDarkMode ? 'bg-zinc-900 border-zinc-700 text-zinc-100' : 'bg-white border-slate-200'
-            }`}
+            className="p-5 rounded-2xl border shadow-2xl w-80 backdrop-blur-2xl bg-white/90 dark:bg-zinc-900/90 border-slate-200/80 dark:border-white/10 text-slate-900 dark:text-zinc-100"
           >
             <h3 className="text-sm font-bold mb-3">Tạo thư mục môn học mới</h3>
             <input
@@ -1193,7 +1155,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               onChange={(e) => setNewFolderNameInput(e.target.value)}
               placeholder="VD: Dược lý học, Bệnh học..."
               className={`w-full px-3 py-2 rounded-xl border text-xs outline-hidden mb-4 ${
-                isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-slate-50 border-slate-200'
+                isDarkMode ? 'bg-zinc-800/80 border-zinc-700' : 'bg-slate-50 border-slate-200'
               }`}
               autoFocus
             />
@@ -1203,7 +1165,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                   setIsCreatingFolder(false);
                   setNewFolderNameInput('');
                 }}
-                className="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 cursor-pointer"
+                className="px-3 py-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-slate-500 cursor-pointer transition-colors"
               >
                 Hủy
               </button>
@@ -1215,7 +1177,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                   setIsCreatingFolder(false);
                   setNewFolderNameInput('');
                 }}
-                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 cursor-pointer"
+                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 cursor-pointer transition-colors"
               >
                 Tạo thư mục
               </button>
