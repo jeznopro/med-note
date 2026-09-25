@@ -39,6 +39,7 @@ interface DocumentLibraryProps {
   onRenameNotebook: (notebookId: string, newTitle: string) => void;
   onToggleFavorite: (notebookId: string) => void;
   onDeleteFolder: (folderId: string) => void;
+  onMoveNotebook?: (notebookId: string, folderId: string | null) => void;
   isDarkMode: boolean;
   isCloudConnected: boolean;
   cloudAccount?: CloudAccount | null;
@@ -62,6 +63,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   onRenameNotebook,
   onToggleFavorite,
   onDeleteFolder,
+  onMoveNotebook,
   isDarkMode,
   isCloudConnected,
   cloudAccount,
@@ -102,7 +104,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       if (currentFolderId) {
         return nb.folderId === currentFolderId;
       }
-      return true;
+      // When at root "Documents", only show notebooks that DO NOT belong to any valid folder
+      const inValidFolder = !!(nb.folderId && folders.some((f) => f.id === nb.folderId));
+      return !inValidFolder;
     })
     .sort((a, b) => {
       if (sortBy === 'date') return b.updatedAt - a.updatedAt;
@@ -715,11 +719,21 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                       {formatDate(nb.updatedAt)}
                     </div>
 
+                    {/* Folder Badge if searching or in favorites */}
+                    {(searchQuery.trim() || navFilter === 'favorites') && nb.folderId && (
+                      <div className="mt-0.5 flex items-center justify-center">
+                        <span className="text-[10px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1 max-w-[90%] truncate">
+                          <FolderIcon className="w-2.5 h-2.5 shrink-0" />
+                          <span className="truncate">{folders.find((f) => f.id === nb.folderId)?.name}</span>
+                        </span>
+                      </div>
+                    )}
+
                     {/* Dropdown Action Menu */}
                     {activeMenuId === nb.id && (
                       <div
                         onClick={(e) => e.stopPropagation()}
-                        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 p-1.5 rounded-xl border shadow-2xl z-50 w-48 text-left ${
+                        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 p-1.5 rounded-xl border shadow-2xl z-50 w-52 text-left ${
                           isDarkMode
                             ? 'bg-zinc-900 border-zinc-700 text-zinc-200'
                             : 'bg-white border-slate-200 text-slate-800'
@@ -759,11 +773,57 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                           <span>Xuất ra PDF</span>
                         </button>
 
+                        {/* Move to folder */}
+                        {onMoveNotebook && folders.length > 0 && (
+                          <div className="py-1 border-t border-slate-100 dark:border-zinc-800 my-1">
+                            <div className="text-[10px] text-zinc-400 font-semibold px-2 py-0.5">
+                              Chuyển vào thư mục:
+                            </div>
+                            <div className="max-h-28 overflow-y-auto space-y-0.5">
+                              {nb.folderId && (
+                                <button
+                                  onClick={() => {
+                                    onMoveNotebook(nb.id, null);
+                                    setActiveMenuId(null);
+                                  }}
+                                  className="w-full text-left px-2 py-1 rounded text-[11px] text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <span>🏠 Ngoài Documents (Gốc)</span>
+                                </button>
+                              )}
+                              {folders.map((f) => (
+                                <button
+                                  key={f.id}
+                                  disabled={nb.folderId === f.id}
+                                  onClick={() => {
+                                    onMoveNotebook(nb.id, f.id);
+                                    setActiveMenuId(null);
+                                  }}
+                                  className={`w-full text-left px-2 py-1 rounded text-[11px] flex items-center gap-1.5 truncate ${
+                                    nb.folderId === f.id
+                                      ? 'text-blue-600 font-bold bg-blue-50 dark:bg-blue-950/40'
+                                      : 'text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer'
+                                  }`}
+                                >
+                                  <FolderIcon className="w-3 h-3 text-blue-400 shrink-0" />
+                                  <span className="truncate">{f.name}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1" />
 
                         <button
                           onClick={() => {
-                            onDeleteNotebook(nb.id);
+                            const folder = folders.find((f) => f.id === nb.folderId);
+                            const msg = folder
+                              ? `Xóa sổ tay "${nb.title}"?\nLưu ý: Sổ tay này đang nằm trong thư mục "${folder.name}". Xóa sẽ xóa hoàn toàn khỏi thư mục này.`
+                              : `Xóa sổ tay "${nb.title}"?`;
+                            if (window.confirm(msg)) {
+                              onDeleteNotebook(nb.id);
+                            }
                             setActiveMenuId(null);
                           }}
                           className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-red-50 dark:hover:bg-red-950/50 text-red-500 cursor-pointer"

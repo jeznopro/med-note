@@ -809,6 +809,21 @@ export default function App() {
     if (currentFolderId === folderId) setCurrentFolderId(null);
   };
 
+  const handleMoveNotebook = (notebookId: string, targetFolderId: string | null) => {
+    setNotebooks((prev) =>
+      prev.map((nb) => {
+        if (nb.id !== notebookId) return nb;
+        const targetFolder = targetFolderId ? folders.find((f) => f.id === targetFolderId) : null;
+        return {
+          ...nb,
+          folderId: targetFolderId,
+          subject: targetFolder ? targetFolder.name : nb.subject,
+          updatedAt: Date.now(),
+        };
+      })
+    );
+  };
+
   const handleCloseTab = (notebookId: string) => {
     const remaining = openNotebookIds.filter((id) => id !== notebookId);
     setOpenNotebookIds(remaining);
@@ -877,6 +892,7 @@ export default function App() {
           onRenameNotebook={handleRenameNotebook}
           onToggleFavorite={handleToggleFavorite}
           onDeleteFolder={handleDeleteFolder}
+          onMoveNotebook={handleMoveNotebook}
           isDarkMode={isDarkMode}
           isCloudConnected={!!cloudAccount}
           cloudAccount={cloudAccount}
