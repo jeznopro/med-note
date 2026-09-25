@@ -31,9 +31,12 @@ export interface Folder {
   id: string;
   name: string;
   color?: string;
+  icon?: string;
   createdAt: number;
   updatedAt: number;
 }
+
+export type NotebookCoverStyle = 'standard' | 'leather' | 'gradient' | 'minimal' | 'medical' | 'anatomy';
 
 export interface Notebook {
   id: string;
@@ -45,6 +48,10 @@ export interface Notebook {
   pdfFileName?: string;
   pages: Page[];
   currentPageIndex: number;
+  coverColor?: string;
+  coverStyle?: NotebookCoverStyle;
+  coverIcon?: string;
+  coverLabel?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -58,3 +65,23 @@ export interface CanvasTransform {
 export type AppViewMode = 'library' | 'editor';
 export type LibrarySortBy = 'date' | 'name';
 export type LibraryNavFilter = 'all' | 'favorites' | 'folder';
+
+export type LibraryWallpaperType =
+  | 'default'
+  | 'animated_aurora'
+  | 'animated_ocean'
+  | 'animated_sunset'
+  | 'animated_stars'
+  | 'animated_pulse'
+  | 'static_desk'
+  | 'static_library'
+  | 'static_greenery'
+  | 'static_mountain'
+  | 'custom_image';
+
+export interface LibraryWallpaperConfig {
+  type: LibraryWallpaperType;
+  customImageUrl?: string;
+  blurLevel: number;
+  dimLevel: number;
+}

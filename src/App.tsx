@@ -1,5 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import type { Page, Notebook, Folder, ToolType, PageTemplate, CanvasTransform, AppViewMode } from './types/document';
+import type {
+  Page,
+  Notebook,
+  Folder,
+  ToolType,
+  PageTemplate,
+  CanvasTransform,
+  AppViewMode,
+  NotebookCoverStyle,
+  LibraryWallpaperConfig,
+} from './types/document';
 import type { ToolState } from './types/tools';
 import { MEDICAL_PEN_COLORS, MEDICAL_HIGHLIGHTER_COLORS } from './types/tools';
 import { PageHistory } from './engine/history';
@@ -18,6 +28,7 @@ const STORAGE_KEY_FOLDERS = 'mednotes_library_folders_v2';
 const STORAGE_KEY_NOTEBOOKS = 'mednotes_library_notebooks_v2';
 const STORAGE_KEY_OPEN_TABS = 'mednotes_open_tabs_v2';
 const STORAGE_KEY_ACTIVE_NB = 'mednotes_active_notebook_v2';
+const STORAGE_KEY_WALLPAPER = 'mednotes_library_wallpaper_v2';
 
 const DEFAULT_PAGE_WIDTH = 820;
 const DEFAULT_PAGE_HEIGHT = 1160;
@@ -34,10 +45,10 @@ function createInitialPage(pageNumber: number, template: PageTemplate = 'ruled')
 }
 
 const INITIAL_FOLDERS: Folder[] = [
-  { id: 'f_anatomy', name: 'Giải phẫu học (Anatomy)', createdAt: Date.now() - 86400000 * 3, updatedAt: Date.now() - 86400000 * 3 },
-  { id: 'f_physiology', name: 'Sinh lý học (Physiology)', createdAt: Date.now() - 86400000 * 2, updatedAt: Date.now() - 86400000 * 2 },
-  { id: 'f_pharmacology', name: 'Dược lý học (Pharmacology)', createdAt: Date.now() - 86400000, updatedAt: Date.now() - 86400000 },
-  { id: 'f_pathology', name: 'Bệnh lý học (Pathology)', createdAt: Date.now(), updatedAt: Date.now() },
+  { id: 'f_anatomy', name: 'Giải phẫu học (Anatomy)', color: '#90CAF9', icon: 'bone', createdAt: Date.now() - 86400000 * 3, updatedAt: Date.now() - 86400000 * 3 },
+  { id: 'f_physiology', name: 'Sinh lý học (Physiology)', color: '#A7F3D0', icon: 'heart', createdAt: Date.now() - 86400000 * 2, updatedAt: Date.now() - 86400000 * 2 },
+  { id: 'f_pharmacology', name: 'Dược lý học (Pharmacology)', color: '#FED7AA', icon: 'pill', createdAt: Date.now() - 86400000, updatedAt: Date.now() - 86400000 },
+  { id: 'f_pathology', name: 'Bệnh lý học (Pathology)', color: '#DDD6FE', icon: 'microscope', createdAt: Date.now(), updatedAt: Date.now() },
 ];
 
 const INITIAL_NOTEBOOKS: Notebook[] = [
@@ -46,6 +57,10 @@ const INITIAL_NOTEBOOKS: Notebook[] = [
     title: 'Giải phẫu học lâm sàng (Gray\'s Anatomy)',
     subject: 'Giải phẫu',
     folderId: 'f_anatomy',
+    coverColor: '#1E3A8A',
+    coverStyle: 'anatomy',
+    coverIcon: 'heart',
+    coverLabel: 'Gray\'s Anatomy Clinic',
     isFavorite: true,
     pages: [
       createInitialPage(1, 'cornell'),
@@ -61,6 +76,10 @@ const INITIAL_NOTEBOOKS: Notebook[] = [
     title: 'Sinh lý tủy sống & Dẫn truyền thần kinh',
     subject: 'Sinh lý',
     folderId: 'f_physiology',
+    coverColor: '#581C87',
+    coverStyle: 'gradient',
+    coverIcon: 'brain',
+    coverLabel: 'Sinh lý Thần kinh Học',
     isFavorite: true,
     pages: [
       createInitialPage(1, 'ruled'),
@@ -75,6 +94,10 @@ const INITIAL_NOTEBOOKS: Notebook[] = [
     title: 'Dược động học & Cơ chế kháng sinh',
     subject: 'Dược lý',
     folderId: 'f_pharmacology',
+    coverColor: '#065F46',
+    coverStyle: 'medical',
+    coverIcon: 'dna',
+    coverLabel: 'Dược lý & Kháng sinh',
     isFavorite: false,
     pages: [
       createInitialPage(1, 'grid'),
@@ -89,6 +112,10 @@ const INITIAL_NOTEBOOKS: Notebook[] = [
     title: 'Bệnh học tim mạch & Xơ vữa động mạch',
     subject: 'Bệnh học',
     folderId: 'f_pathology',
+    coverColor: '#991B1B',
+    coverStyle: 'leather',
+    coverIcon: 'pulse',
+    coverLabel: 'Bệnh học Tim mạch',
     isFavorite: false,
     pages: [
       createInitialPage(1, 'cornell'),
@@ -133,6 +160,24 @@ export default function App() {
   });
 
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+
+  // Library Wallpaper configuration
+  const [wallpaperConfig, setWallpaperConfig] = useState<LibraryWallpaperConfig>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_WALLPAPER);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { type: 'none', blur: 0, dim: 0 };
+  });
+
+  const handleSaveWallpaperConfig = (config: LibraryWallpaperConfig) => {
+    setWallpaperConfig(config);
+    try {
+      localStorage.setItem(STORAGE_KEY_WALLPAPER, JSON.stringify(config));
+    } catch (e) {
+      console.warn('Failed to save wallpaper config', e);
+    }
+  };
 
   // Tabs and Active Notebook State in Editor (Persisted)
   const [openNotebookIds, setOpenNotebookIds] = useState<string[]>(() => {
@@ -594,7 +639,7 @@ export default function App() {
     title: string = 'Sổ tay Y khoa mới',
     template: PageTemplate = 'cornell',
     folderId: string | null = null,
-    _coverColor?: string
+    coverColor?: string
   ) => {
     const newId = `nb_${Date.now()}`;
     const matchedFolder = folderId ? folders.find((f) => f.id === folderId) : null;
@@ -603,6 +648,9 @@ export default function App() {
       title: title || `Sổ tay Y khoa ${notebooks.length + 1}`,
       subject: matchedFolder ? matchedFolder.name : 'Ghi chép',
       folderId: folderId || null,
+      coverColor: coverColor || '#1E3A8A',
+      coverStyle: 'standard',
+      coverLabel: title || `Sổ tay Y khoa ${notebooks.length + 1}`,
       pages: [createInitialPage(1, template)],
       currentPageIndex: 0,
       createdAt: Date.now(),
@@ -827,6 +875,50 @@ export default function App() {
     );
   };
 
+  const handleUpdateNotebookCover = (
+    notebookId: string,
+    coverColor: string,
+    coverStyle: NotebookCoverStyle,
+    coverIcon?: string,
+    coverLabel?: string
+  ) => {
+    setNotebooks((prev) =>
+      prev.map((nb) =>
+        nb.id === notebookId
+          ? {
+              ...nb,
+              coverColor,
+              coverStyle,
+              coverIcon,
+              coverLabel,
+              updatedAt: Date.now(),
+            }
+          : nb
+      )
+    );
+  };
+
+  const handleUpdateFolder = (
+    folderId: string,
+    name: string,
+    color?: string,
+    icon?: string
+  ) => {
+    setFolders((prev) =>
+      prev.map((f) =>
+        f.id === folderId
+          ? {
+              ...f,
+              name,
+              color,
+              icon,
+              updatedAt: Date.now(),
+            }
+          : f
+      )
+    );
+  };
+
   const handleCloseTab = (notebookId: string) => {
     const remaining = openNotebookIds.filter((id) => id !== notebookId);
     setOpenNotebookIds(remaining);
@@ -896,6 +988,10 @@ export default function App() {
           onToggleFavorite={handleToggleFavorite}
           onDeleteFolder={handleDeleteFolder}
           onMoveNotebook={handleMoveNotebook}
+          onUpdateNotebookCover={handleUpdateNotebookCover}
+          onUpdateFolder={handleUpdateFolder}
+          wallpaperConfig={wallpaperConfig}
+          onSaveWallpaperConfig={handleSaveWallpaperConfig}
           isDarkMode={isDarkMode}
           isCloudConnected={!!cloudAccount}
           cloudAccount={cloudAccount}

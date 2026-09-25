@@ -20,3 +20,56 @@
   }
 }
 
+@keyframes auroraFlow {
+  0% {
+    background-position: 0% 50%;
+    filter: hue-rotate(0deg);
+  }
+  50% {
+    background-position: 100% 50%;
+    filter: hue-rotate(25deg);
+  }
+  100% {
+    background-position: 0% 50%;
+    filter: hue-rotate(0deg);
+  }
+}
+
+@keyframes oceanFlow {
+  0% {
+    background-position: 0% 0%;
+  }
+  50% {
+    background-position: 100% 100%;
+  }
+  100% {
+    background-position: 0% 0%;
+  }
+}
+
+@keyframes sunsetFlow {
+  0% {
+    background-position: 0% 100%;
+  }
+  50% {
+    background-position: 100% 0%;
+  }
+  100% {
+    background-position: 0% 100%;
+  }
+}
+
+.animate-aurora {
+  background-size: 300% 300%;
+  animation: auroraFlow 16s ease infinite;
+}
+
+.animate-ocean {
+  background-size: 250% 250%;
+  animation: oceanFlow 14s ease infinite;
+}
+
+.animate-sunset {
+  background-size: 250% 250%;
+  animation: sunsetFlow 18s ease infinite;
+}

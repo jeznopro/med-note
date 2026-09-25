@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import type { Notebook, Folder, LibrarySortBy, PageTemplate } from '../../types/document';
 import {
   Folder as FolderIcon,
@@ -17,11 +17,20 @@ import {
   RefreshCw,
   Bookmark,
   LayoutGrid,
+  Palette,
+  Sparkles,
+  Activity,
+  Heart,
 } from 'lucide-react';
 import { GoogleDriveIcon } from '../Icons/GoogleIcons';
 import type { CloudAccount } from '../../services/googleDrive';
 import { exportNotebookAsPdf } from '../../pdf/pdfExporter';
 import { NewNotebookModal } from '../Modals/NewNotebookModal';
+import { EditCoverModal, COVER_ICONS } from '../Modals/EditCoverModal';
+import { EditFolderModal, FOLDER_COLORS, FOLDER_ICONS } from '../Modals/EditFolderModal';
+import { WallpaperModal } from '../Modals/WallpaperModal';
+import { LibraryBackground } from './LibraryBackground';
+import type { NotebookCoverStyle, LibraryWallpaperConfig } from '../../types/document';
 
 interface DocumentLibraryProps {
   notebooks: Notebook[];
@@ -40,6 +49,16 @@ interface DocumentLibraryProps {
   onToggleFavorite: (notebookId: string) => void;
   onDeleteFolder: (folderId: string) => void;
   onMoveNotebook?: (notebookId: string, folderId: string | null) => void;
+  onUpdateNotebookCover?: (
+    notebookId: string,
+    coverColor: string,
+    coverStyle: NotebookCoverStyle,
+    coverIcon?: string,
+    coverLabel?: string
+  ) => void;
+  onUpdateFolder?: (folderId: string, name: string, color?: string, icon?: string) => void;
+  wallpaperConfig: LibraryWallpaperConfig;
+  onSaveWallpaperConfig: (config: LibraryWallpaperConfig) => void;
   isDarkMode: boolean;
   isCloudConnected: boolean;
   cloudAccount?: CloudAccount | null;
@@ -64,6 +83,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   onToggleFavorite,
   onDeleteFolder,
   onMoveNotebook,
+  onUpdateNotebookCover,
+  onUpdateFolder,
+  wallpaperConfig,
+  onSaveWallpaperConfig,
   isDarkMode,
   isCloudConnected,
   cloudAccount,
@@ -76,6 +99,20 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [showNewMenu, setShowNewMenu] = useState(false);
   const [isNewNotebookModalOpen, setIsNewNotebookModalOpen] = useState(false);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [isWallpaperModalOpen, setIsWallpaperModalOpen] = useState(false);
+  const [editingCoverNotebook, setEditingCoverNotebook] = useState<Notebook | null>(null);
+  const [editingFolder, setEditingFolder] = useState<Folder | null>(null);
+  const [activeFolderMenuId, setActiveFolderMenuId] = useState<string | null>(null);
+
+  // Close menus on click outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setActiveMenuId(null);
+      setActiveFolderMenuId(null);
+    };
+    window.addEventListener('click', handleClickOutside);
+    return () => window.removeEventListener('click', handleClickOutside);
+  }, []);
 
   // Dialog states
   const [isRenaming, setIsRenaming] = useState<string | null>(null);
@@ -361,9 +398,12 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       </aside>
 
       {/* 2. Main Content Area (Documents Grid - Exactly matching Image 1) */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden relative">
+        {/* Dynamic & Static Wallpaper Engine */}
+        <LibraryBackground config={wallpaperConfig} isDarkMode={isDarkMode} />
+
         {/* Main Content Header */}
-        <header className="h-16 px-8 flex items-center justify-between border-b border-slate-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 backdrop-blur-md">
+        <header className="h-16 px-8 flex items-center justify-between border-b border-slate-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 backdrop-blur-md relative z-10">
           {/* Header Title (Image 1 Style: Bold "Documents") */}
           <div className="flex items-center gap-3">
             {currentFolderId ? (
@@ -477,11 +517,21 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               <FolderUp className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
               <span className="hidden sm:inline">Nhập cả thư mục</span>
             </button>
+
+            {/* Wallpaper Button */}
+            <button
+              onClick={() => setIsWallpaperModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-purple-200 dark:border-purple-900/60 bg-purple-50/80 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-xs font-semibold text-purple-700 dark:text-purple-300 cursor-pointer transition-colors shadow-2xs"
+              title="Cài đặt hình nền động hoặc ảnh tĩnh cho trang chủ"
+            >
+              <Palette className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+              <span className="hidden sm:inline">Hình nền</span>
+            </button>
           </div>
         </header>
 
         {/* Grid Cards Container (Image 1 replica: Grid layout of New..., Notebooks, and Folders) */}
-        <div className="flex-1 overflow-y-auto p-8 lg:p-10">
+        <div className="flex-1 overflow-y-auto p-8 lg:p-10 relative z-10">
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-7 max-w-7xl">
             {/* Card 1: [ + ] New... (Exact replica of Image 1) */}
             <div className="relative flex flex-col items-center">
@@ -568,9 +618,18 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               )}
             </div>
 
-            {/* Folder Cards (Image 1 Style: Baby blue GoodNotes folder icon) */}
+            {/* Folder Cards (GoodNotes Custom Pastel Folder with Icon & Color) */}
             {visibleFolders.map((folder) => {
               const count = notebooks.filter((n) => n.folderId === folder.id).length;
+              const colorObj =
+                FOLDER_COLORS.find((c) => c.front === folder.color) || {
+                  id: 'default',
+                  name: 'Mặc định',
+                  front: folder.color || '#90CAF9',
+                  back: '#64B5F6',
+                };
+              const FolderIconComp =
+                FOLDER_ICONS.find((i) => i.id === folder.icon)?.icon || FolderIcon;
 
               return (
                 <div
@@ -580,60 +639,125 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                 >
                   {/* Folder Graphic Container */}
                   <div className="w-full aspect-[1/1.38] rounded-xl flex flex-col items-center justify-center relative transition-all group-hover:scale-102">
-                    {/* Authentic GoodNotes Baby-Blue Folder SVG Mockup */}
+                    {/* Authentic GoodNotes Custom Pastel Folder SVG Mockup */}
                     <div className="w-4/5 aspect-[1.25/1] relative flex items-center justify-center">
                       <svg viewBox="0 0 100 80" className="w-full h-full drop-shadow-sm transition-transform group-hover:scale-103">
                         {/* Folder Back Tab */}
                         <path
                           d="M 5,20 C 5,12 12,5 20,5 L 42,5 C 47,5 50,10 54,14 L 58,18 L 85,18 C 93,18 97,22 97,30 L 97,70 C 97,76 93,80 85,80 L 15,80 C 7,80 3,76 3,70 Z"
-                          fill="#84C5F4"
+                          fill={colorObj.back}
                         />
-                        {/* Folder Front Face with Soft Gradient */}
-                        <path
-                          d="M 3,26 C 3,20 8,16 15,16 L 85,16 C 92,16 97,20 97,26 L 97,70 C 97,76 92,80 85,80 L 15,80 C 8,80 3,76 3,70 Z"
-                          fill="#A5D6A7"
-                          className="opacity-0"
-                        />
+                        {/* Folder Front Face */}
                         <rect
                           x="3"
                           y="22"
                           width="94"
                           height="56"
                           rx="8"
-                          fill="#90CAF9"
+                          fill={colorObj.front}
                         />
                       </svg>
 
+                      {/* Custom Icon Emblem in center of folder */}
+                      {folder.icon && folder.icon !== 'folder' && (
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 p-2 rounded-xl bg-white/70 dark:bg-black/30 backdrop-blur-xs text-slate-800 dark:text-white shadow-xs">
+                          <FolderIconComp className="w-5 h-5 stroke-[2]" />
+                        </div>
+                      )}
+
                       {/* Item count pill inside folder */}
-                      <span className="absolute bottom-2 font-mono text-[10px] font-bold text-blue-800/80 bg-white/70 px-2 py-0.2 rounded-full shadow-2xs">
+                      <span className="absolute bottom-2 font-mono text-[10px] font-bold text-slate-800/80 bg-white/75 px-2 py-0.2 rounded-full shadow-2xs">
                         {count} {count === 1 ? 'item' : 'items'}
                       </span>
                     </div>
                   </div>
 
                   {/* Folder Title in Blue with Dropdown Chevron (Image 1 style) */}
-                  <div className="w-full text-center mt-1 px-1">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectFolder(folder.id);
-                      }}
-                      className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 max-w-full truncate"
-                    >
-                      <span className="truncate">{folder.name}</span>
-                      <ChevronDown className="w-3 h-3 shrink-0" />
-                    </button>
+                  <div className="w-full text-center mt-1 px-1 relative">
+                    <div className="inline-flex items-center gap-0.5 justify-center max-w-full">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectFolder(folder.id);
+                        }}
+                        className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline truncate cursor-pointer"
+                      >
+                        {folder.name}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveFolderMenuId(activeFolderMenuId === folder.id ? null : folder.id);
+                        }}
+                        className="p-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 text-blue-600 dark:text-blue-400 cursor-pointer"
+                        title="Tùy chọn thư mục"
+                      >
+                        <ChevronDown className="w-3 h-3 shrink-0" />
+                      </button>
+                    </div>
+
                     <div className="text-[10px] text-slate-400 truncate">
                       {formatDate(folder.updatedAt)}
                     </div>
+
+                    {/* Folder dropdown menu */}
+                    {activeFolderMenuId === folder.id && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 p-1.5 rounded-xl border shadow-2xl z-50 w-48 text-left ${
+                          isDarkMode
+                            ? 'bg-zinc-900 border-zinc-700 text-zinc-200'
+                            : 'bg-white border-slate-200 text-slate-800'
+                        }`}
+                      >
+                        <button
+                          onClick={() => {
+                            setEditingFolder(folder);
+                            setActiveFolderMenuId(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-blue-600 dark:text-blue-400 font-medium"
+                        >
+                          <Palette className="w-3.5 h-3.5" />
+                          <span>Đổi màu & icon...</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            const newName = window.prompt('Nhập tên mới cho thư mục:', folder.name);
+                            if (newName && newName.trim() && onUpdateFolder) {
+                              onUpdateFolder(folder.id, newName.trim(), folder.color, folder.icon);
+                            }
+                            setActiveFolderMenuId(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
+                        >
+                          <Edit2 className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Đổi tên thư mục</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Xóa thư mục "${folder.name}"? Các sổ tay bên trong sẽ được chuyển ra ngoài Documents.`)) {
+                              onDeleteFolder(folder.id);
+                            }
+                            setActiveFolderMenuId(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-red-50 dark:hover:bg-red-950/50 text-red-500 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Xóa thư mục</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })}
 
-            {/* Notebook Document Cards (Image 1 Style: Pure Bright Paper preview with notes and title ˅) */}
+            {/* Notebook Document Cards (Image 1 Style: Pure Bright Paper preview or Custom Cover) */}
             {filteredNotebooks.map((nb) => {
               const isPdf = !!nb.pdfDataUrl;
+              const hasCustomCover = !!nb.coverColor;
 
               return (
                 <div
@@ -641,13 +765,28 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                   onClick={() => onOpenNotebook(nb)}
                   className="group relative flex flex-col items-center cursor-pointer"
                 >
-                  {/* Card Body: Portrait paper sheet with soft drop shadow */}
+                  {/* Card Body: Either Custom Notebook Cover or Portrait paper sheet */}
                   <div
                     className={`w-full aspect-[1/1.38] rounded-xl border flex flex-col relative overflow-hidden transition-all group-hover:scale-102 group-hover:shadow-lg ${
-                      isDarkMode
+                      hasCustomCover
+                        ? 'border-white/20 text-white shadow-md'
+                        : isDarkMode
                         ? 'bg-zinc-900 border-zinc-800 text-zinc-100 shadow-md'
                         : 'bg-white border-[#E2E6EA] text-slate-800 shadow-sm'
                     }`}
+                    style={
+                      hasCustomCover
+                        ? {
+                            backgroundColor: nb.coverColor,
+                            backgroundImage:
+                              nb.coverStyle === 'gradient'
+                                ? `linear-gradient(135deg, ${nb.coverColor} 0%, #0f172a 100%)`
+                                : nb.coverStyle === 'leather'
+                                ? `radial-gradient(circle at 50% 30%, rgba(255,255,255,0.18) 0%, rgba(0,0,0,0.35) 100%)`
+                                : undefined,
+                          }
+                        : undefined
+                    }
                   >
                     {/* Top Bookmark Star */}
                     <button
@@ -655,9 +794,11 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                         e.stopPropagation();
                         onToggleFavorite(nb.id);
                       }}
-                      className={`absolute top-2 right-2 p-1 rounded-full z-10 transition-colors ${
+                      className={`absolute top-2 right-2 p-1 rounded-full z-20 transition-colors ${
                         nb.isFavorite
                           ? 'text-amber-400 opacity-100'
+                          : hasCustomCover
+                          ? 'text-white/60 hover:text-amber-400 opacity-0 group-hover:opacity-100'
                           : 'text-slate-300 hover:text-amber-400 opacity-0 group-hover:opacity-100'
                       }`}
                     >
@@ -666,40 +807,106 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
 
                     {/* PDF Badge if PDF file */}
                     {isPdf && (
-                      <span className="absolute top-2 left-2 px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-500 text-white font-mono shadow-2xs z-10">
+                      <span className="absolute top-2 left-2 px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-500 text-white font-mono shadow-2xs z-20">
                         PDF
                       </span>
                     )}
 
-                    {/* Miniature Page Content Preview (Making it look like real GoodNotes pages in Image 1) */}
-                    <div className="flex-1 p-3.5 flex flex-col justify-between relative select-none">
-                      {/* Title Header line */}
-                      <div>
-                        <div className="text-[10px] font-bold text-slate-800 dark:text-zinc-200 truncate border-b border-slate-100 dark:border-zinc-800 pb-1">
-                          {nb.title}
-                        </div>
-                        {/* Faint Cornell / Ruled Notes lines simulation */}
-                        <div className="mt-2 space-y-1.5 opacity-50">
-                          <div className="h-1 bg-slate-300 dark:bg-zinc-600 rounded-full w-5/6" />
-                          <div className="h-1 bg-slate-200 dark:bg-zinc-700 rounded-full w-full" />
-                          <div className="h-1 bg-slate-200 dark:bg-zinc-700 rounded-full w-3/4" />
-                          <div className="h-1 bg-blue-300 rounded-full w-2/3 opacity-80" />
-                        </div>
-                      </div>
+                    {hasCustomCover ? (
+                      /* CUSTOM COVER RENDERING */
+                      <>
+                        {/* Left Spine Ribbon Binding Effect */}
+                        <div className="absolute top-0 left-0 bottom-0 w-2.5 bg-black/30 border-r border-white/10 z-10" />
 
-                      {/* Faint sketch diagram simulation */}
-                      <div className="my-auto py-1 flex items-center justify-center opacity-40">
-                        <div className="w-10 h-10 rounded-full border border-blue-400 border-dashed flex items-center justify-center text-[7px] text-blue-600 font-bold bg-blue-50/40">
-                          Anatomy
+                        {/* Embossed Stitching for Leather */}
+                        {nb.coverStyle === 'leather' && (
+                          <div className="absolute inset-1.5 border border-dashed border-amber-300/40 rounded-lg pointer-events-none z-10" />
+                        )}
+
+                        {/* Watermark anatomy / medical symbol background */}
+                        {(nb.coverStyle === 'medical' || nb.coverStyle === 'anatomy') && (
+                          <div className="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
+                            {nb.coverStyle === 'medical' ? (
+                              <Activity className="w-24 h-24 text-white stroke-[1]" />
+                            ) : (
+                              <Heart className="w-24 h-24 text-white stroke-[1]" />
+                            )}
+                          </div>
+                        )}
+
+                        {/* Cover Content */}
+                        <div className="flex-1 p-2.5 pl-4 flex flex-col justify-between relative select-none z-10">
+                          {/* Top Header Label */}
+                          <div className="flex items-center justify-between text-[8px] font-bold text-white/75 tracking-wider uppercase">
+                            <span>MedNotes</span>
+                            {nb.coverIcon && (
+                              <div className="p-0.5 rounded-full bg-white/20 text-white">
+                                {React.createElement(
+                                  COVER_ICONS.find((i) => i.id === nb.coverIcon)?.icon || Sparkles,
+                                  { className: 'w-3 h-3' }
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Center Title Badge */}
+                          <div className="my-auto py-1">
+                            <div
+                              className={`p-2 rounded-lg text-center backdrop-blur-md transition-all ${
+                                nb.coverStyle === 'minimal'
+                                  ? 'bg-amber-100/95 text-amber-950 border border-amber-300 shadow-xs'
+                                  : nb.coverStyle === 'leather'
+                                  ? 'bg-amber-950/80 text-amber-100 border border-amber-500/50 shadow-inner'
+                                  : 'bg-white/90 dark:bg-zinc-900/90 text-slate-900 dark:text-white border border-white/40 shadow-xs'
+                              }`}
+                            >
+                              <p className="text-[10px] font-black leading-tight line-clamp-2">
+                                {nb.coverLabel || nb.title}
+                              </p>
+                              <p className="text-[8px] opacity-75 font-medium mt-0.5">
+                                {nb.pages.length} trang
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Bottom Spine Detail */}
+                          <div className="flex items-center justify-between text-[7px] text-white/60 font-mono">
+                            <span>VOL. I</span>
+                            <span>{nb.subject || 'Y khoa'}</span>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      /* STANDARD PAPER PREVIEW */
+                      <div className="flex-1 p-3.5 flex flex-col justify-between relative select-none">
+                        {/* Title Header line */}
+                        <div>
+                          <div className="text-[10px] font-bold text-slate-800 dark:text-zinc-200 truncate border-b border-slate-100 dark:border-zinc-800 pb-1">
+                            {nb.title}
+                          </div>
+                          {/* Faint Cornell / Ruled Notes lines simulation */}
+                          <div className="mt-2 space-y-1.5 opacity-50">
+                            <div className="h-1 bg-slate-300 dark:bg-zinc-600 rounded-full w-5/6" />
+                            <div className="h-1 bg-slate-200 dark:bg-zinc-700 rounded-full w-full" />
+                            <div className="h-1 bg-slate-200 dark:bg-zinc-700 rounded-full w-3/4" />
+                            <div className="h-1 bg-blue-300 rounded-full w-2/3 opacity-80" />
+                          </div>
+                        </div>
+
+                        {/* Faint sketch diagram simulation */}
+                        <div className="my-auto py-1 flex items-center justify-center opacity-40">
+                          <div className="w-10 h-10 rounded-full border border-blue-400 border-dashed flex items-center justify-center text-[7px] text-blue-600 font-bold bg-blue-50/40">
+                            Anatomy
+                          </div>
+                        </div>
+
+                        {/* Page count pill */}
+                        <div className="flex items-center justify-between text-[8px] text-slate-400 font-mono">
+                          <span className="capitalize">{nb.pages[0]?.template || 'Cornell'}</span>
+                          <span>{nb.pages.length} trang</span>
                         </div>
                       </div>
-
-                      {/* Page count pill */}
-                      <div className="flex items-center justify-between text-[8px] text-slate-400 font-mono">
-                        <span className="capitalize">{nb.pages[0]?.template || 'Cornell'}</span>
-                        <span>{nb.pages.length} trang</span>
-                      </div>
-                    </div>
+                    )}
                   </div>
 
                   {/* Title Under Card: Blue text with dropdown chevron (Image 1 style) */}
@@ -739,6 +946,17 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                             : 'bg-white border-slate-200 text-slate-800'
                         }`}
                       >
+                        <button
+                          onClick={() => {
+                            setEditingCoverNotebook(nb);
+                            setActiveMenuId(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-indigo-600 dark:text-indigo-400 font-semibold"
+                        >
+                          <Palette className="w-3.5 h-3.5" />
+                          <span>Đổi bìa sổ tay...</span>
+                        </button>
+
                         <button
                           onClick={() => {
                             setIsRenaming(nb.id);
@@ -937,6 +1155,45 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           </div>
         </div>
       )}
+
+      {/* Edit Cover Modal */}
+      {editingCoverNotebook && (
+        <EditCoverModal
+          isOpen={!!editingCoverNotebook}
+          onClose={() => setEditingCoverNotebook(null)}
+          notebook={editingCoverNotebook}
+          onSaveCover={(id, color, style, icon, label) => {
+            if (onUpdateNotebookCover) {
+              onUpdateNotebookCover(id, color, style, icon, label);
+            }
+          }}
+          isDarkMode={isDarkMode}
+        />
+      )}
+
+      {/* Edit Folder Modal */}
+      {editingFolder && (
+        <EditFolderModal
+          isOpen={!!editingFolder}
+          onClose={() => setEditingFolder(null)}
+          folder={editingFolder}
+          onSaveFolder={(id, name, color, icon) => {
+            if (onUpdateFolder) {
+              onUpdateFolder(id, name, color, icon);
+            }
+          }}
+          isDarkMode={isDarkMode}
+        />
+      )}
+
+      {/* Library Wallpaper Modal */}
+      <WallpaperModal
+        isOpen={isWallpaperModalOpen}
+        onClose={() => setIsWallpaperModalOpen(false)}
+        config={wallpaperConfig}
+        onSaveConfig={onSaveWallpaperConfig}
+        isDarkMode={isDarkMode}
+      />
     </div>
   );
 };
