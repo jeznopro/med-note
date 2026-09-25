@@ -21,6 +21,7 @@ interface VirtualContinuousPageProps {
   isLastPage: boolean;
   onAutoAddNewPage?: (navigateNow?: boolean) => void;
   onSelectPage: (index: number) => void;
+  isPencilMode?: boolean;
 }
 
 export const VirtualContinuousPage: React.FC<VirtualContinuousPageProps> = ({
@@ -39,6 +40,7 @@ export const VirtualContinuousPage: React.FC<VirtualContinuousPageProps> = ({
   isLastPage,
   onAutoAddNewPage,
   onSelectPage,
+  isPencilMode = true,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -97,6 +99,7 @@ export const VirtualContinuousPage: React.FC<VirtualContinuousPageProps> = ({
           onHistoryChange={onHistoryChange}
           isLastPage={isLastPage}
           onAutoAddNewPage={onAutoAddNewPage}
+          isPencilMode={isPencilMode}
         />
       ) : (
         <div

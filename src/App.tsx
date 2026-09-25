@@ -331,6 +331,25 @@ export default function App() {
     offsetY: 0,
   });
 
+  // Apple Pencil Discrimination Mode: Stylus writes with pressure, finger scrolls (Palm Rejection)
+  const [isPencilMode, setIsPencilMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('mednotes_pencil_mode');
+      if (saved !== null) return JSON.parse(saved);
+    } catch {}
+    return true;
+  });
+
+  const handleTogglePencilMode = () => {
+    setIsPencilMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('mednotes_pencil_mode', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
   // Undo / Redo histories mapped per page
   const pageHistoriesRef = useRef<Map<string, PageHistory>>(new Map());
 
@@ -1182,6 +1201,8 @@ export default function App() {
             onClearPage={handleClearPage}
             isDarkMode={isDarkMode}
             onToggleDarkMode={() => setIsDarkMode((d) => !d)}
+            isPencilMode={isPencilMode}
+            onTogglePencilMode={handleTogglePencilMode}
           />
 
           {/* Main Workspace: Page Thumbnails Sidebar + Note Canvas Container */}
@@ -1228,6 +1249,7 @@ export default function App() {
                       onHistoryChange={notifyHistoryChange}
                       isLastPage={idx === activeNotebook.pages.length - 1}
                       onAutoAddNewPage={handleAutoAddNewPage}
+                      isPencilMode={isPencilMode}
                       onSelectPage={(index) => {
                         if (activeNotebook.currentPageIndex !== index) {
                           setNotebooks((prev) =>
@@ -1258,6 +1280,7 @@ export default function App() {
                       onHistoryChange={notifyHistoryChange}
                       isLastPage={isLastPage}
                       onAutoAddNewPage={handleAutoAddNewPage}
+                      isPencilMode={isPencilMode}
                     />
                   </div>
                 </div>

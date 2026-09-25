@@ -19,6 +19,7 @@ interface NoteCanvasProps {
   onHistoryChange: () => void;
   isLastPage?: boolean;
   onAutoAddNewPage?: (navigateNow?: boolean) => void;
+  isPencilMode?: boolean;
 }
 
 export const NoteCanvas: React.FC<NoteCanvasProps> = ({
@@ -33,6 +34,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
   onHistoryChange,
   isLastPage = false,
   onAutoAddNewPage,
+  isPencilMode = true,
 }) => {
   const [showAutoPageToast, setShowAutoPageToast] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -45,6 +47,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
   const cursorDotRef = useRef<HTMLDivElement | null>(null);
 
   const isDrawingRef = useRef(false);
+  const isFingerPanningRef = useRef(false);
   const currentPointsRef = useRef<Point[]>([]);
   const erasedStrokesInSessionRef = useRef<Stroke[]>([]);
   const panStartRef = useRef<{ clientX: number; clientY: number; scrollLeft: number; scrollTop: number } | null>(null);
@@ -181,21 +184,42 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
   );
 
   // Update position of the custom circular pen dot cursor
-  const updateCursorDotPosition = useCallback((x: number, y: number) => {
+  const updateCursorDotPosition = useCallback((x: number, y: number, pointerType?: string) => {
     if (cursorDotRef.current) {
-      if (toolState.currentTool === 'pan') {
+      if (toolState.currentTool === 'pan' || isFingerPanningRef.current || (isPencilMode && pointerType === 'touch')) {
         cursorDotRef.current.style.display = 'none';
       } else {
         cursorDotRef.current.style.display = 'block';
         cursorDotRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
       }
     }
-  }, [toolState.currentTool]);
+  }, [toolState.currentTool, isPencilMode]);
 
   // Pointer Down (Start stroke, erase, or pan drag-scroll)
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
 
+    const isFinger = e.pointerType === 'touch';
+
+    // 1. Apple Pencil mode: Finger automatically scrolls the document (Palm Rejection)
+    if (isPencilMode && isFinger) {
+      const scrollEl = document.getElementById('editor-main-container');
+      if (scrollEl) {
+        panStartRef.current = {
+          clientX: e.clientX,
+          clientY: e.clientY,
+          scrollLeft: scrollEl.scrollLeft,
+          scrollTop: scrollEl.scrollTop,
+        };
+        isDrawingRef.current = true;
+        isFingerPanningRef.current = true;
+        const canvas = draftCanvasRef.current;
+        if (canvas) canvas.setPointerCapture(e.pointerId);
+      }
+      return;
+    }
+
+    // 2. Pan tool explicitly active
     if (toolState.currentTool === 'pan') {
       const scrollEl = document.getElementById('editor-main-container');
       if (scrollEl) {
@@ -206,12 +230,14 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
           scrollTop: scrollEl.scrollTop,
         };
         isDrawingRef.current = true;
+        isFingerPanningRef.current = false;
         const canvas = draftCanvasRef.current;
         if (canvas) canvas.setPointerCapture(e.pointerId);
       }
       return;
     }
 
+    // 3. Drawing / Writing with Apple Pencil, Mouse, or finger (when Pencil Mode is disabled)
     e.preventDefault();
 
     const canvas = draftCanvasRef.current;
@@ -219,8 +245,9 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
     canvas.setPointerCapture(e.pointerId);
 
     isDrawingRef.current = true;
+    isFingerPanningRef.current = false;
     const pt = getCanvasPoint(e);
-    updateCursorDotPosition(pt[0], pt[1]);
+    updateCursorDotPosition(pt[0], pt[1], e.pointerType);
 
     if (toolState.currentTool === 'eraser') {
       erasedStrokesInSessionRef.current = [];
@@ -283,11 +310,11 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
   // Pointer Move (Collect coalesced events for 120Hz-240Hz styluses + update cursor dot + Pan drag)
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const pt = getCanvasPoint(e);
-    updateCursorDotPosition(pt[0], pt[1]);
+    updateCursorDotPosition(pt[0], pt[1], e.pointerType);
 
     if (!isDrawingRef.current) return;
 
-    if (toolState.currentTool === 'pan') {
+    if (isFingerPanningRef.current || toolState.currentTool === 'pan') {
       if (panStartRef.current) {
         const scrollEl = document.getElementById('editor-main-container');
         if (scrollEl) {
@@ -324,6 +351,9 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
+
+    const wasFingerPanning = isFingerPanningRef.current;
+    isFingerPanningRef.current = false;
     panStartRef.current = null;
 
     const canvas = draftCanvasRef.current;
@@ -331,7 +361,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
       canvas.releasePointerCapture(e.pointerId);
     }
 
-    if (toolState.currentTool === 'pan') return;
+    if (wasFingerPanning || toolState.currentTool === 'pan') return;
 
     if (toolState.currentTool === 'eraser') {
       if (erasedStrokesInSessionRef.current.length > 0) {
@@ -406,7 +436,7 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
 
   const handlePointerEnter = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const pt = getCanvasPoint(e);
-    updateCursorDotPosition(pt[0], pt[1]);
+    updateCursorDotPosition(pt[0], pt[1], e.pointerType);
   };
 
   const handlePointerLeave = () => {
@@ -540,12 +570,14 @@ export const NoteCanvas: React.FC<NoteCanvasProps> = ({
               onPointerLeave={handlePointerLeave}
               className="absolute inset-0 w-full h-full rounded-xs"
               style={{
-                touchAction: toolState.currentTool === 'pan' ? 'pan-x pan-y' : 'none',
+                touchAction: toolState.currentTool === 'pan' || isPencilMode ? 'pan-x pan-y' : 'none',
                 cursor:
                   toolState.currentTool === 'pan'
                     ? isDrawingRef.current
                       ? 'grabbing'
                       : 'grab'
+                    : isPencilMode && isDrawingRef.current && isFingerPanningRef.current
+                    ? 'grabbing'
                     : 'none',
               }}
             />

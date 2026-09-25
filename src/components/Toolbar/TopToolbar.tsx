@@ -23,6 +23,7 @@ import {
   RefreshCw,
   ScrollText,
   FileText,
+  Pencil,
 } from 'lucide-react';
 import { GoogleDriveIcon } from '../Icons/GoogleIcons';
 import type { CloudAccount } from '../../services/googleDrive';
@@ -74,6 +75,8 @@ interface TopToolbarProps {
   cloudAccount?: CloudAccount | null;
   syncStatus: 'idle' | 'syncing' | 'success' | 'error';
   onOpenCloudSettings: () => void;
+  isPencilMode?: boolean;
+  onTogglePencilMode?: () => void;
 }
 
 export const TopToolbar: React.FC<TopToolbarProps> = ({
@@ -115,6 +118,8 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
   onClearPage,
   isDarkMode,
   onToggleDarkMode,
+  isPencilMode = true,
+  onTogglePencilMode,
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
@@ -466,6 +471,33 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
               <span className="hidden md:inline">Cuộn</span>
             </button>
           </div>
+
+          {/* Apple Pencil Discrimination Mode Toggle */}
+          {onTogglePencilMode && (
+            <button
+              onClick={onTogglePencilMode}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
+                isPencilMode
+                  ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 font-semibold shadow-2xs'
+                  : 'bg-slate-100/70 dark:bg-zinc-800/70 border-slate-200 dark:border-zinc-700 text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
+              }`}
+              title={
+                isPencilMode
+                  ? 'Chế độ Bút Apple Pencil: Bút để viết, Ngón tay để cuộn trang (Tự động chống tì đè tay)'
+                  : 'Chế độ cảm ứng thường: Ngón tay cũng vẽ được mực'
+              }
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">
+                {isPencilMode ? 'Bút iPad' : 'Ngón tay'}
+              </span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  isPencilMode ? 'bg-blue-500 animate-pulse' : 'bg-slate-300 dark:bg-zinc-600'
+                }`}
+              />
+            </button>
+          )}
 
           {/* Color Palette Quick Buttons (Image 2 style: 3 round circles + color picker chevron) */}
           {toolState.currentTool !== 'eraser' && toolState.currentTool !== 'pan' && (
