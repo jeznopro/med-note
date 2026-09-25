@@ -257,6 +257,38 @@ export const CloudSettingsModal: React.FC<CloudSettingsModalProps> = ({
                     </button>
                   </div>
 
+                  {/* Clarification Alert if using local cache mode */}
+                  {account.accessToken.startsWith('demo_token_') && (
+                    <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-300 text-xs space-y-2">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Dữ liệu đang lưu an toàn trên máy bạn (Chưa tải lên drive.google.com thật)</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        Vì lý do bảo mật của Google, để thư mục <code>MedNotes_Backup</code> tự động xuất hiện trên ứng dụng <strong>drive.google.com</strong> thật, bạn cần bấm xác thực tài khoản Google qua <strong>Google Cloud OAuth Client ID</strong>.
+                      </p>
+                      <div className="pt-0.5 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSignOut();
+                            setShowAdvancedOAuth(true);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] cursor-pointer shadow-2xs"
+                        >
+                          ⚙️ Thiết lập kết nối Google Drive thật
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleOfflineExport}
+                          className="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 font-semibold text-[11px] cursor-pointer"
+                        >
+                          📥 Tải file sao lưu về máy (.json)
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Sync Details */}
                   <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-inherit">
                     <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-zinc-800/50">
