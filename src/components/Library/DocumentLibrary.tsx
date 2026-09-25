@@ -1,0 +1,818 @@
+import React, { useState, useRef } from 'react';
+import type { Notebook, Folder, LibrarySortBy, PageTemplate } from '../../types/document';
+import {
+  Folder as FolderIcon,
+  Star,
+  Plus,
+  Search,
+  Upload,
+  BookOpen,
+  Trash2,
+  Copy,
+  Download,
+  Edit2,
+  ChevronRight,
+  ChevronDown,
+  RefreshCw,
+  Bookmark,
+  LayoutGrid,
+} from 'lucide-react';
+import { GoogleDriveIcon } from '../Icons/GoogleIcons';
+import type { CloudAccount } from '../../services/googleDrive';
+import { exportNotebookAsPdf } from '../../pdf/pdfExporter';
+import { NewNotebookModal } from '../Modals/NewNotebookModal';
+
+interface DocumentLibraryProps {
+  notebooks: Notebook[];
+  folders: Folder[];
+  currentFolderId: string | null;
+  onSelectFolder: (folderId: string | null) => void;
+  onOpenNotebook: (notebook: Notebook) => void;
+  onCreateNotebook: (title: string, template: PageTemplate, folderId: string | null, coverColor: string) => void;
+  onCreateFolder: (name: string) => void;
+  onImportPdf: (file: File, folderId?: string | null) => void;
+  onDuplicateNotebook: (notebookId: string) => void;
+  onDeleteNotebook: (notebookId: string) => void;
+  onRenameNotebook: (notebookId: string, newTitle: string) => void;
+  onToggleFavorite: (notebookId: string) => void;
+  onDeleteFolder: (folderId: string) => void;
+  isDarkMode: boolean;
+  isCloudConnected: boolean;
+  cloudAccount?: CloudAccount | null;
+  syncStatus: 'idle' | 'syncing' | 'success' | 'error';
+  onOpenCloudSettings: () => void;
+}
+
+export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
+  notebooks,
+  folders,
+  currentFolderId,
+  onSelectFolder,
+  onOpenNotebook,
+  onCreateNotebook,
+  onCreateFolder,
+  onImportPdf,
+  onDuplicateNotebook,
+  onDeleteNotebook,
+  onRenameNotebook,
+  onToggleFavorite,
+  onDeleteFolder,
+  isDarkMode,
+  isCloudConnected,
+  cloudAccount,
+  syncStatus,
+  onOpenCloudSettings,
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [navFilter, setNavFilter] = useState<'all' | 'favorites'>('all');
+  const [sortBy, setSortBy] = useState<LibrarySortBy>('date');
+  const [showNewMenu, setShowNewMenu] = useState(false);
+  const [isNewNotebookModalOpen, setIsNewNotebookModalOpen] = useState(false);
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+
+  // Dialog states
+  const [isRenaming, setIsRenaming] = useState<string | null>(null);
+  const [newTitleInput, setNewTitleInput] = useState('');
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [newFolderNameInput, setNewFolderNameInput] = useState('');
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Filter notebooks
+  const currentFolder = folders.find((f) => f.id === currentFolderId);
+
+  const filteredNotebooks = notebooks
+    .filter((nb) => {
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          nb.title.toLowerCase().includes(q) ||
+          (nb.subject && nb.subject.toLowerCase().includes(q))
+        );
+      }
+      if (navFilter === 'favorites') {
+        return !!nb.isFavorite;
+      }
+      if (currentFolderId) {
+        return nb.folderId === currentFolderId;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'date') return b.updatedAt - a.updatedAt;
+      return a.title.localeCompare(b.title);
+    });
+
+  const visibleFolders = currentFolderId
+    ? []
+    : folders.filter((f) => {
+        if (searchQuery.trim()) {
+          return f.name.toLowerCase().includes(searchQuery.toLowerCase());
+        }
+        return navFilter === 'all';
+      });
+
+  const handlePdfUploadClick = () => {
+    setShowNewMenu(false);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type === 'application/pdf') {
+      onImportPdf(file, currentFolderId);
+    }
+    e.target.value = '';
+  };
+
+  const formatDate = (timestamp: number) => {
+    const d = new Date(timestamp);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()} at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  };
+
+  return (
+    <div
+      className={`h-screen w-screen flex select-none overflow-hidden font-sans ${
+        isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-[#F7F8FA] text-slate-800'
+      }`}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
+      {/* 1. Left Sidebar (GoodNotes Clean White/Light Sidebar) */}
+      <aside
+        className={`w-60 border-r flex flex-col shrink-0 transition-colors ${
+          isDarkMode
+            ? 'bg-zinc-900 border-zinc-800 text-zinc-300'
+            : 'bg-white border-slate-200 text-slate-700 shadow-2xs'
+        }`}
+      >
+        {/* macOS Window Controls (Traffic Lights: Red, Yellow, Green) */}
+        <div className="h-12 px-4 flex items-center gap-2 border-b border-slate-100 dark:border-zinc-800">
+          <div className="w-3 h-3 rounded-full bg-[#FF5F56] border border-[#E0443E]" />
+          <div className="w-3 h-3 rounded-full bg-[#FFBD2E] border border-[#DEA123]" />
+          <div className="w-3 h-3 rounded-full bg-[#27C93F] border border-[#1AAB29]" />
+          <span className="font-bold text-xs ml-2 text-slate-800 dark:text-zinc-200">MedNotes</span>
+        </div>
+
+        {/* macOS Pill Search Box */}
+        <div className="px-3 pt-3 pb-2">
+          <div
+            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs ${
+              isDarkMode
+                ? 'bg-zinc-800/80 border-zinc-700 text-zinc-200'
+                : 'bg-slate-50 border-slate-200 text-slate-700'
+            }`}
+          >
+            <Search className="w-3.5 h-3.5 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search"
+              className="bg-transparent border-none outline-hidden w-full text-xs placeholder:text-slate-400"
+            />
+          </div>
+        </div>
+
+        {/* Sidebar Navigation Items (Matching Image 1) */}
+        <div className="px-2 py-1 space-y-1 text-xs font-medium">
+          <button
+            onClick={() => {
+              setNavFilter('all');
+              onSelectFolder(null);
+            }}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors cursor-pointer ${
+              navFilter === 'all' && !currentFolderId
+                ? isDarkMode
+                  ? 'bg-zinc-800 text-white font-semibold'
+                  : 'bg-blue-50 text-blue-700 font-bold border border-blue-100 shadow-2xs'
+                : 'hover:bg-slate-100 text-slate-600 dark:text-zinc-400'
+            }`}
+          >
+            <LayoutGrid className="w-4 h-4 text-blue-600" />
+            <span>Documents</span>
+            <span className="ml-auto text-[11px] opacity-60 font-mono">{notebooks.length}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setNavFilter('favorites');
+              onSelectFolder(null);
+            }}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors cursor-pointer ${
+              navFilter === 'favorites'
+                ? isDarkMode
+                  ? 'bg-zinc-800 text-white font-semibold'
+                  : 'bg-amber-50 text-amber-700 font-bold border border-amber-100 shadow-2xs'
+                : 'hover:bg-slate-100 text-slate-600 dark:text-zinc-400'
+            }`}
+          >
+            <Bookmark className="w-4 h-4 text-amber-500" />
+            <span>Favorites</span>
+            <span className="ml-auto text-[11px] opacity-60 font-mono">
+              {notebooks.filter((n) => n.isFavorite).length}
+            </span>
+          </button>
+        </div>
+
+        {/* Medical Folders Section in Sidebar */}
+        <div className="mt-4 px-3 flex items-center justify-between">
+          <span className="text-[10px] font-bold tracking-wider text-slate-400 dark:text-zinc-500 uppercase">
+            Môn học / Folders
+          </span>
+          <button
+            onClick={() => setIsCreatingFolder(true)}
+            className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 cursor-pointer"
+            title="Tạo thư mục môn học mới"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-2 py-1 space-y-0.5 text-xs">
+          {folders.map((folder) => {
+            const isSelected = currentFolderId === folder.id;
+            const count = notebooks.filter((n) => n.folderId === folder.id).length;
+
+            return (
+              <div
+                key={folder.id}
+                onClick={() => {
+                  setNavFilter('all');
+                  onSelectFolder(folder.id);
+                }}
+                className={`group flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                  isSelected
+                    ? isDarkMode
+                      ? 'bg-zinc-800 text-white font-semibold'
+                      : 'bg-[#DDE1E6] text-slate-900 font-semibold'
+                    : 'hover:bg-black/5 dark:hover:bg-white/5 text-slate-600 dark:text-zinc-400'
+                }`}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <FolderIcon className="w-3.5 h-3.5 text-sky-400 fill-sky-400/40" />
+                  <span className="truncate">{folder.name}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] opacity-60 font-mono">{count}</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteFolder(folder.id);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-500"
+                    title="Xóa thư mục"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer Google Drive Login / Sync Widget */}
+        <div className="p-3 border-t border-black/5 dark:border-white/5 space-y-2">
+          <button
+            onClick={onOpenCloudSettings}
+            className={`w-full flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all shadow-2xs group ${
+              isCloudConnected
+                ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                : 'bg-blue-50/90 dark:bg-zinc-800 border-blue-200 dark:border-zinc-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100'
+            }`}
+          >
+            <div className="flex items-center gap-2 truncate">
+              <GoogleDriveIcon className="w-4 h-4 shrink-0 transition-transform group-hover:scale-110" />
+              <div className="text-left truncate">
+                <div className="font-bold text-[11px] truncate">
+                  {isCloudConnected ? cloudAccount?.name || 'Google Drive' : 'Đăng nhập Google Drive'}
+                </div>
+                <div className="text-[9px] opacity-70">
+                  {isCloudConnected ? 'Tự động sao lưu đang bật' : 'Sao lưu ngầm mọi nét vẽ'}
+                </div>
+              </div>
+            </div>
+            {isCloudConnected ? (
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+            ) : (
+              <span className="text-[10px] text-blue-600 font-bold shrink-0">Vào →</span>
+            )}
+          </button>
+
+          <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-zinc-500 px-1">
+            <span>GoodNotes Engine</span>
+            <span className="px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-600 font-bold">v2.0</span>
+          </div>
+        </div>
+      </aside>
+
+      {/* 2. Main Content Area (Documents Grid - Exactly matching Image 1) */}
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Main Content Header */}
+        <header className="h-16 px-8 flex items-center justify-between border-b border-slate-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 backdrop-blur-md">
+          {/* Header Title (Image 1 Style: Bold "Documents") */}
+          <div className="flex items-center gap-3">
+            {currentFolderId ? (
+              <div className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+                <button
+                  onClick={() => onSelectFolder(null)}
+                  className="text-slate-400 hover:text-blue-600 cursor-pointer transition-colors"
+                >
+                  Documents
+                </button>
+                <ChevronRight className="w-5 h-5 text-slate-400" />
+                <span className="text-slate-900 dark:text-zinc-100">{currentFolder?.name}</span>
+              </div>
+            ) : (
+              <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-zinc-100">
+                {navFilter === 'favorites' ? 'Favorites' : 'Documents'}
+              </h1>
+            )}
+          </div>
+
+          {/* Center / Right Header Controls: [ Date ] [ Name ] Segmented Control (Image 1 replica) */}
+          <div className="flex items-center gap-4">
+            {/* Pill Segmented Control [ Date ] [ Name ] */}
+            <div
+              className={`flex items-center p-0.5 rounded-md border text-xs font-semibold ${
+                isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-[#EAECEF] border-[#DFE2E6]'
+              }`}
+            >
+              <button
+                onClick={() => setSortBy('date')}
+                className={`px-3 py-1 rounded-sm transition-all cursor-pointer ${
+                  sortBy === 'date'
+                    ? isDarkMode
+                      ? 'bg-zinc-800 text-white shadow-2xs'
+                      : 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Date
+              </button>
+              <button
+                onClick={() => setSortBy('name')}
+                className={`px-3 py-1 rounded-sm transition-all cursor-pointer ${
+                  sortBy === 'name'
+                    ? isDarkMode
+                      ? 'bg-zinc-800 text-white shadow-2xs'
+                      : 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Name
+              </button>
+            </div>
+
+            {/* Google Drive Login / Auto-Sync Button */}
+            <button
+              onClick={onOpenCloudSettings}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-all shadow-2xs group ${
+                isCloudConnected
+                  ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/90 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
+                  : 'border-blue-200 dark:border-zinc-700 bg-blue-50/90 dark:bg-zinc-800 hover:bg-blue-100 text-blue-700 dark:text-blue-400'
+              }`}
+              title={
+                isCloudConnected
+                  ? `Tài khoản: ${cloudAccount?.email || 'Google Drive'} • Đang tự động sao lưu`
+                  : 'Đăng nhập tài khoản Google Drive để tự động sao lưu dữ liệu'
+              }
+            >
+              {syncStatus === 'syncing' ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-500" />
+              ) : (
+                <GoogleDriveIcon className="w-4 h-4 shrink-0 transition-transform group-hover:scale-110" />
+              )}
+              <span>
+                {syncStatus === 'syncing'
+                  ? 'Đang lưu Drive...'
+                  : isCloudConnected
+                  ? 'Đã kết nối Drive'
+                  : 'Đăng nhập Google Drive'}
+              </span>
+              {isCloudConnected && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+              )}
+            </button>
+
+            {/* Quick New Notebook Button */}
+            <button
+              onClick={() => setIsNewNotebookModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs cursor-pointer transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Tạo sổ tay</span>
+            </button>
+
+            {/* Import PDF Button */}
+            <button
+              onClick={handlePdfUploadClick}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 text-xs font-medium text-slate-700 dark:text-zinc-300 cursor-pointer transition-colors shadow-2xs"
+              title="Nhập tài liệu PDF giáo trình y khoa"
+            >
+              <Upload className="w-3.5 h-3.5 text-blue-500" />
+              <span className="hidden sm:inline">Import PDF</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Grid Cards Container (Image 1 replica: Grid layout of New..., Notebooks, and Folders) */}
+        <div className="flex-1 overflow-y-auto p-8 lg:p-10">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-7 max-w-7xl">
+            {/* Card 1: [ + ] New... (Exact replica of Image 1) */}
+            <div className="relative flex flex-col items-center">
+              <div
+                onClick={() => setShowNewMenu(!showNewMenu)}
+                className={`w-full aspect-[1/1.38] rounded-xl border flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-102 hover:shadow-md ${
+                  isDarkMode
+                    ? 'bg-zinc-900/60 border-zinc-800 hover:border-blue-500'
+                    : 'bg-[#F9FAFB] border-[#D9DDE2] hover:border-blue-400 shadow-2xs'
+                }`}
+              >
+                {/* Minimalist Blue Plus in the center */}
+                <Plus className="w-8 h-8 text-blue-500 stroke-[1.75]" />
+              </div>
+
+              {/* Title under New... Card: Blue text with dropdown chevron */}
+              <button
+                onClick={() => setShowNewMenu(!showNewMenu)}
+                className="mt-2 text-xs font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1 cursor-pointer hover:underline"
+              >
+                <span>New...</span>
+                <ChevronDown className="w-3 h-3" />
+              </button>
+
+              {/* Popover Menu for [ + ] New */}
+              {showNewMenu && (
+                <div
+                  className={`absolute top-full left-0 mt-2 p-1.5 rounded-xl border shadow-2xl z-50 w-52 ${
+                    isDarkMode
+                      ? 'bg-zinc-900 border-zinc-700 text-zinc-200'
+                      : 'bg-white border-slate-200 text-slate-800'
+                  }`}
+                >
+                  <button
+                    onClick={() => {
+                      setShowNewMenu(false);
+                      setIsNewNotebookModalOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-left"
+                  >
+                    <BookOpen className="w-4 h-4 text-blue-500" />
+                    <div>
+                      <div className="font-semibold">Notebook mới</div>
+                      <div className="text-[10px] text-slate-400">Chọn bìa & mẫu giấy Cornell</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={handlePdfUploadClick}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-left"
+                  >
+                    <Upload className="w-4 h-4 text-emerald-500" />
+                    <div>
+                      <div className="font-semibold">Nhập PDF...</div>
+                      <div className="text-[10px] text-slate-400">Đọc & vẽ đè lên trang PDF</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsCreatingFolder(true);
+                      setShowNewMenu(false);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-left"
+                  >
+                    <FolderIcon className="w-4 h-4 text-amber-500" />
+                    <div>
+                      <div className="font-semibold">Thư mục mới</div>
+                      <div className="text-[10px] text-slate-400">Tổ chức theo bộ môn Y</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Folder Cards (Image 1 Style: Baby blue GoodNotes folder icon) */}
+            {visibleFolders.map((folder) => {
+              const count = notebooks.filter((n) => n.folderId === folder.id).length;
+
+              return (
+                <div
+                  key={folder.id}
+                  onClick={() => onSelectFolder(folder.id)}
+                  className="group relative flex flex-col items-center cursor-pointer"
+                >
+                  {/* Folder Graphic Container */}
+                  <div className="w-full aspect-[1/1.38] rounded-xl flex flex-col items-center justify-center relative transition-all group-hover:scale-102">
+                    {/* Authentic GoodNotes Baby-Blue Folder SVG Mockup */}
+                    <div className="w-4/5 aspect-[1.25/1] relative flex items-center justify-center">
+                      <svg viewBox="0 0 100 80" className="w-full h-full drop-shadow-sm transition-transform group-hover:scale-103">
+                        {/* Folder Back Tab */}
+                        <path
+                          d="M 5,20 C 5,12 12,5 20,5 L 42,5 C 47,5 50,10 54,14 L 58,18 L 85,18 C 93,18 97,22 97,30 L 97,70 C 97,76 93,80 85,80 L 15,80 C 7,80 3,76 3,70 Z"
+                          fill="#84C5F4"
+                        />
+                        {/* Folder Front Face with Soft Gradient */}
+                        <path
+                          d="M 3,26 C 3,20 8,16 15,16 L 85,16 C 92,16 97,20 97,26 L 97,70 C 97,76 92,80 85,80 L 15,80 C 8,80 3,76 3,70 Z"
+                          fill="#A5D6A7"
+                          className="opacity-0"
+                        />
+                        <rect
+                          x="3"
+                          y="22"
+                          width="94"
+                          height="56"
+                          rx="8"
+                          fill="#90CAF9"
+                        />
+                      </svg>
+
+                      {/* Item count pill inside folder */}
+                      <span className="absolute bottom-2 font-mono text-[10px] font-bold text-blue-800/80 bg-white/70 px-2 py-0.2 rounded-full shadow-2xs">
+                        {count} {count === 1 ? 'item' : 'items'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Folder Title in Blue with Dropdown Chevron (Image 1 style) */}
+                  <div className="w-full text-center mt-1 px-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectFolder(folder.id);
+                      }}
+                      className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 max-w-full truncate"
+                    >
+                      <span className="truncate">{folder.name}</span>
+                      <ChevronDown className="w-3 h-3 shrink-0" />
+                    </button>
+                    <div className="text-[10px] text-slate-400 truncate">
+                      {formatDate(folder.updatedAt)}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Notebook Document Cards (Image 1 Style: Pure Bright Paper preview with notes and title ˅) */}
+            {filteredNotebooks.map((nb) => {
+              const isPdf = !!nb.pdfDataUrl;
+
+              return (
+                <div
+                  key={nb.id}
+                  onClick={() => onOpenNotebook(nb)}
+                  className="group relative flex flex-col items-center cursor-pointer"
+                >
+                  {/* Card Body: Portrait paper sheet with soft drop shadow */}
+                  <div
+                    className={`w-full aspect-[1/1.38] rounded-xl border flex flex-col relative overflow-hidden transition-all group-hover:scale-102 group-hover:shadow-lg ${
+                      isDarkMode
+                        ? 'bg-zinc-900 border-zinc-800 text-zinc-100 shadow-md'
+                        : 'bg-white border-[#E2E6EA] text-slate-800 shadow-sm'
+                    }`}
+                  >
+                    {/* Top Bookmark Star */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleFavorite(nb.id);
+                      }}
+                      className={`absolute top-2 right-2 p-1 rounded-full z-10 transition-colors ${
+                        nb.isFavorite
+                          ? 'text-amber-400 opacity-100'
+                          : 'text-slate-300 hover:text-amber-400 opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <Star className={`w-3.5 h-3.5 ${nb.isFavorite ? 'fill-amber-400' : ''}`} />
+                    </button>
+
+                    {/* PDF Badge if PDF file */}
+                    {isPdf && (
+                      <span className="absolute top-2 left-2 px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-500 text-white font-mono shadow-2xs z-10">
+                        PDF
+                      </span>
+                    )}
+
+                    {/* Miniature Page Content Preview (Making it look like real GoodNotes pages in Image 1) */}
+                    <div className="flex-1 p-3.5 flex flex-col justify-between relative select-none">
+                      {/* Title Header line */}
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-800 dark:text-zinc-200 truncate border-b border-slate-100 dark:border-zinc-800 pb-1">
+                          {nb.title}
+                        </div>
+                        {/* Faint Cornell / Ruled Notes lines simulation */}
+                        <div className="mt-2 space-y-1.5 opacity-50">
+                          <div className="h-1 bg-slate-300 dark:bg-zinc-600 rounded-full w-5/6" />
+                          <div className="h-1 bg-slate-200 dark:bg-zinc-700 rounded-full w-full" />
+                          <div className="h-1 bg-slate-200 dark:bg-zinc-700 rounded-full w-3/4" />
+                          <div className="h-1 bg-blue-300 rounded-full w-2/3 opacity-80" />
+                        </div>
+                      </div>
+
+                      {/* Faint sketch diagram simulation */}
+                      <div className="my-auto py-1 flex items-center justify-center opacity-40">
+                        <div className="w-10 h-10 rounded-full border border-blue-400 border-dashed flex items-center justify-center text-[7px] text-blue-600 font-bold bg-blue-50/40">
+                          Anatomy
+                        </div>
+                      </div>
+
+                      {/* Page count pill */}
+                      <div className="flex items-center justify-between text-[8px] text-slate-400 font-mono">
+                        <span className="capitalize">{nb.pages[0]?.template || 'Cornell'}</span>
+                        <span>{nb.pages.length} trang</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Title Under Card: Blue text with dropdown chevron (Image 1 style) */}
+                  <div className="w-full text-center mt-1.5 px-1 relative">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenuId(activeMenuId === nb.id ? null : nb.id);
+                      }}
+                      className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1 max-w-full cursor-pointer"
+                    >
+                      <span className="truncate">{nb.title}</span>
+                      <ChevronDown className="w-3 h-3 shrink-0" />
+                    </button>
+
+                    <div className="text-[10px] text-slate-400 truncate">
+                      {formatDate(nb.updatedAt)}
+                    </div>
+
+                    {/* Dropdown Action Menu */}
+                    {activeMenuId === nb.id && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 p-1.5 rounded-xl border shadow-2xl z-50 w-48 text-left ${
+                          isDarkMode
+                            ? 'bg-zinc-900 border-zinc-700 text-zinc-200'
+                            : 'bg-white border-slate-200 text-slate-800'
+                        }`}
+                      >
+                        <button
+                          onClick={() => {
+                            setIsRenaming(nb.id);
+                            setNewTitleInput(nb.title);
+                            setActiveMenuId(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
+                        >
+                          <Edit2 className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Đổi tên</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            onDuplicateNotebook(nb.id);
+                            setActiveMenuId(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
+                        >
+                          <Copy className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Nhân bản</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            exportNotebookAsPdf(nb, isDarkMode);
+                            setActiveMenuId(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5 text-blue-500" />
+                          <span>Xuất ra PDF</span>
+                        </button>
+
+                        <div className="h-px bg-slate-100 dark:bg-zinc-800 my-1" />
+
+                        <button
+                          onClick={() => {
+                            onDeleteNotebook(nb.id);
+                            setActiveMenuId(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs hover:bg-red-50 dark:hover:bg-red-950/50 text-red-500 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Xóa sổ tay</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </main>
+
+      {/* New Notebook Modal */}
+      <NewNotebookModal
+        isOpen={isNewNotebookModalOpen}
+        onClose={() => setIsNewNotebookModalOpen(false)}
+        folders={folders}
+        currentFolderId={currentFolderId}
+        onCreate={onCreateNotebook}
+        isDarkMode={isDarkMode}
+      />
+
+      {/* Rename Dialog Modal */}
+      {isRenaming && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50">
+          <div
+            className={`p-5 rounded-2xl border shadow-2xl w-80 ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-700 text-zinc-100' : 'bg-white border-slate-200'
+            }`}
+          >
+            <h3 className="text-sm font-bold mb-3">Đổi tên tài liệu</h3>
+            <input
+              type="text"
+              value={newTitleInput}
+              onChange={(e) => setNewTitleInput(e.target.value)}
+              className={`w-full px-3 py-2 rounded-xl border text-xs outline-hidden mb-4 ${
+                isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-slate-50 border-slate-200'
+              }`}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                onClick={() => setIsRenaming(null)}
+                className="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => {
+                  if (newTitleInput.trim()) {
+                    onRenameNotebook(isRenaming, newTitleInput.trim());
+                  }
+                  setIsRenaming(null);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 cursor-pointer"
+              >
+                Lưu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Folder Modal */}
+      {isCreatingFolder && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50">
+          <div
+            className={`p-5 rounded-2xl border shadow-2xl w-80 ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-700 text-zinc-100' : 'bg-white border-slate-200'
+            }`}
+          >
+            <h3 className="text-sm font-bold mb-3">Tạo thư mục môn học mới</h3>
+            <input
+              type="text"
+              value={newFolderNameInput}
+              onChange={(e) => setNewFolderNameInput(e.target.value)}
+              placeholder="VD: Dược lý học, Bệnh học..."
+              className={`w-full px-3 py-2 rounded-xl border text-xs outline-hidden mb-4 ${
+                isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-slate-50 border-slate-200'
+              }`}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                onClick={() => {
+                  setIsCreatingFolder(false);
+                  setNewFolderNameInput('');
+                }}
+                className="px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => {
+                  if (newFolderNameInput.trim()) {
+                    onCreateFolder(newFolderNameInput.trim());
+                  }
+                  setIsCreatingFolder(false);
+                  setNewFolderNameInput('');
+                }}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 cursor-pointer"
+              >
+                Tạo thư mục
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
