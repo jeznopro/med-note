@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import type { Notebook, Folder, LibrarySortBy, PageTemplate } from '../../types/document';
 import {
   Folder as FolderIcon,
+  FolderUp,
   Star,
   Plus,
   Search,
@@ -31,6 +32,8 @@ interface DocumentLibraryProps {
   onCreateNotebook: (title: string, template: PageTemplate, folderId: string | null, coverColor: string) => void;
   onCreateFolder: (name: string) => void;
   onImportPdf: (file: File, folderId?: string | null) => void;
+  onImportFolder?: (files: File[], folderId?: string | null) => void;
+  onImportMultiplePdfs?: (files: File[], folderId?: string | null) => void;
   onDuplicateNotebook: (notebookId: string) => void;
   onDeleteNotebook: (notebookId: string) => void;
   onRenameNotebook: (notebookId: string, newTitle: string) => void;
@@ -52,6 +55,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   onCreateNotebook,
   onCreateFolder,
   onImportPdf,
+  onImportFolder,
+  onImportMultiplePdfs,
   onDuplicateNotebook,
   onDeleteNotebook,
   onRenameNotebook,
@@ -77,6 +82,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [newFolderNameInput, setNewFolderNameInput] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
 
   // Filter notebooks
   const currentFolder = folders.find((f) => f.id === currentFolderId);
@@ -117,10 +123,33 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     fileInputRef.current?.click();
   };
 
+  const handleFolderUploadClick = () => {
+    setShowNewMenu(false);
+    folderInputRef.current?.click();
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
-      onImportPdf(file, currentFolderId);
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith('.pdf'));
+    if (files.length === 1) {
+      onImportPdf(files[0], currentFolderId);
+    } else if (files.length > 1) {
+      if (onImportMultiplePdfs) {
+        onImportMultiplePdfs(files, currentFolderId);
+      } else {
+        files.forEach((f) => onImportPdf(f, currentFolderId));
+      }
+    }
+    e.target.value = '';
+  };
+
+  const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+    if (onImportFolder) {
+      onImportFolder(files, currentFolderId);
     }
     e.target.value = '';
   };
@@ -137,12 +166,26 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-[#F7F8FA] text-slate-800'
       }`}
     >
+      {/* Individual or Multiple PDF File Upload */}
       <input
         ref={fileInputRef}
         type="file"
         accept="application/pdf"
+        multiple
         className="hidden"
         onChange={handleFileChange}
+      />
+
+      {/* Entire Folder Upload (with webkitdirectory) */}
+      <input
+        ref={folderInputRef}
+        type="file"
+        // @ts-expect-error webkitdirectory is standard for folder picker
+        webkitdirectory=""
+        directory=""
+        multiple
+        className="hidden"
+        onChange={handleFolderChange}
       />
 
       {/* 1. Left Sidebar (GoodNotes Clean White/Light Sidebar) */}
@@ -415,10 +458,20 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             <button
               onClick={handlePdfUploadClick}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 text-xs font-medium text-slate-700 dark:text-zinc-300 cursor-pointer transition-colors shadow-2xs"
-              title="Nhập tài liệu PDF giáo trình y khoa"
+              title="Nhập 1 hoặc nhiều tài liệu PDF"
             >
               <Upload className="w-3.5 h-3.5 text-blue-500" />
-              <span className="hidden sm:inline">Import PDF</span>
+              <span className="hidden sm:inline">Nhập PDF</span>
+            </button>
+
+            {/* Import Folder Button */}
+            <button
+              onClick={handleFolderUploadClick}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/80 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-semibold text-indigo-700 dark:text-indigo-300 cursor-pointer transition-colors shadow-2xs"
+              title="Nhập toàn bộ thư mục chứa các file PDF từ máy tính"
+            >
+              <FolderUp className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span className="hidden sm:inline">Nhập cả thư mục</span>
             </button>
           </div>
         </header>
@@ -479,7 +532,18 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                     <Upload className="w-4 h-4 text-emerald-500" />
                     <div>
                       <div className="font-semibold">Nhập PDF...</div>
-                      <div className="text-[10px] text-slate-400">Đọc & vẽ đè lên trang PDF</div>
+                      <div className="text-[10px] text-slate-400">Chọn 1 hoặc nhiều file PDF lẻ</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={handleFolderUploadClick}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer text-left"
+                  >
+                    <FolderUp className="w-4 h-4 text-indigo-500" />
+                    <div>
+                      <div className="font-semibold">Nhập cả thư mục...</div>
+                      <div className="text-[10px] text-slate-400">Tự tạo folder & nạp tất cả PDF bên trong</div>
                     </div>
                   </button>
 

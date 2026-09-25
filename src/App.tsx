@@ -198,6 +198,20 @@ export default function App() {
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [pdfLoadingName, setPdfLoadingName] = useState('');
 
+  const [importProgress, setImportProgress] = useState<{
+    isLoading: boolean;
+    title: string;
+    current: number;
+    total: number;
+    currentFileName: string;
+  }>({
+    isLoading: false,
+    title: '',
+    current: 0,
+    total: 0,
+    currentFileName: '',
+  });
+
   // Drawing Tools State
   const [toolState, setToolState] = useState<ToolState>({
     currentTool: 'pen',
@@ -608,6 +622,127 @@ export default function App() {
     }
   };
 
+  const handleImportFolder = async (files: File[], targetFolderId?: string | null) => {
+    const pdfFiles = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
+    if (pdfFiles.length === 0) {
+      alert('Thư mục được chọn không chứa file PDF nào hợp lệ.');
+      return;
+    }
+
+    let finalFolderId = targetFolderId;
+    let folderName = 'Thư mục tài liệu PDF';
+
+    const relativePath = (pdfFiles[0] as unknown as { webkitRelativePath?: string }).webkitRelativePath;
+    if (relativePath) {
+      const parts = relativePath.split('/');
+      if (parts.length > 1 && parts[0].trim()) {
+        folderName = parts[0].trim();
+      }
+    }
+
+    // If not currently inside a folder, create a new folder with the chosen folder's name
+    if (!finalFolderId) {
+      finalFolderId = `folder_${Date.now()}`;
+      const newFolder: Folder = {
+        id: finalFolderId,
+        name: folderName,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      setFolders((prev) => [...prev, newFolder]);
+    }
+
+    setImportProgress({
+      isLoading: true,
+      title: `Đang nhập thư mục: "${folderName}"`,
+      current: 0,
+      total: pdfFiles.length,
+      currentFileName: pdfFiles[0].name,
+    });
+
+    const importedNotebooks: Notebook[] = [];
+
+    for (let i = 0; i < pdfFiles.length; i++) {
+      const file = pdfFiles[i];
+      setImportProgress((prev) => ({
+        ...prev,
+        current: i + 1,
+        currentFileName: file.name,
+      }));
+
+      try {
+        const nb = await createNotebookFromPdf(file);
+        nb.folderId = finalFolderId;
+        importedNotebooks.push(nb);
+      } catch (err) {
+        console.error(`Lỗi khi nạp file ${file.name}:`, err);
+      }
+    }
+
+    if (importedNotebooks.length > 0) {
+      setNotebooks((prev) => [...importedNotebooks, ...prev]);
+      setCurrentFolderId(finalFolderId);
+      setViewMode('library');
+    }
+
+    setImportProgress({
+      isLoading: false,
+      title: '',
+      current: 0,
+      total: 0,
+      currentFileName: '',
+    });
+  };
+
+  const handleImportMultiplePdfs = async (files: File[], folderId?: string | null) => {
+    const pdfFiles = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
+    if (pdfFiles.length === 0) return;
+
+    const targetFolder = folderId || currentFolderId || null;
+
+    setImportProgress({
+      isLoading: true,
+      title: `Đang nạp ${pdfFiles.length} tài liệu PDF...`,
+      current: 0,
+      total: pdfFiles.length,
+      currentFileName: pdfFiles[0].name,
+    });
+
+    const importedNotebooks: Notebook[] = [];
+
+    for (let i = 0; i < pdfFiles.length; i++) {
+      const file = pdfFiles[i];
+      setImportProgress((prev) => ({
+        ...prev,
+        current: i + 1,
+        currentFileName: file.name,
+      }));
+
+      try {
+        const nb = await createNotebookFromPdf(file);
+        nb.folderId = targetFolder;
+        importedNotebooks.push(nb);
+      } catch (err) {
+        console.error(`Lỗi khi nạp file ${file.name}:`, err);
+      }
+    }
+
+    if (importedNotebooks.length > 0) {
+      setNotebooks((prev) => [...importedNotebooks, ...prev]);
+      if (importedNotebooks.length === 1) {
+        handleOpenNotebook(importedNotebooks[0]);
+      }
+    }
+
+    setImportProgress({
+      isLoading: false,
+      title: '',
+      current: 0,
+      total: 0,
+      currentFileName: '',
+    });
+  };
+
   const handleDuplicateNotebook = (notebookId: string) => {
     const target = notebooks.find((n) => n.id === notebookId);
     if (!target) return;
@@ -719,6 +854,8 @@ export default function App() {
           onCreateNotebook={handleCreateNotebook}
           onCreateFolder={handleCreateFolder}
           onImportPdf={handleImportPdf}
+          onImportFolder={handleImportFolder}
+          onImportMultiplePdfs={handleImportMultiplePdfs}
           onDuplicateNotebook={handleDuplicateNotebook}
           onDeleteNotebook={handleDeleteNotebook}
           onRenameNotebook={handleRenameNotebook}
@@ -924,7 +1061,7 @@ export default function App() {
         }}
       />
 
-      {/* PDF Loading Overlay */}
+      {/* PDF Single Loading Overlay */}
       {isPdfLoading && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 select-none">
           <div
@@ -942,6 +1079,46 @@ export default function App() {
               <h3 className="text-sm font-bold">Đang nạp tài liệu PDF...</h3>
               <p className="text-xs text-slate-400 mt-1 truncate max-w-xs">{pdfLoadingName}</p>
               <p className="text-[10px] text-slate-400 mt-0.5">Tự động khởi tạo từng trang và chuẩn bị bộ nhớ nét vẽ</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch / Folder Import Progress Overlay */}
+      {importProgress.isLoading && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 select-none">
+          <div
+            className={`p-6 rounded-2xl border shadow-2xl flex flex-col items-center gap-4 text-center max-w-md w-full ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-700 text-zinc-100' : 'bg-white border-slate-200 text-slate-800'
+            }`}
+          >
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-900 flex items-center justify-center text-indigo-600">
+              <svg className="w-6 h-6 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            </div>
+
+            <div className="w-full">
+              <h3 className="text-sm font-bold truncate">{importProgress.title}</h3>
+              <div className="flex items-center justify-between text-xs text-slate-400 mt-2 font-mono">
+                <span>Đang xử lý: {importProgress.current} / {importProgress.total} file</span>
+                <span>{Math.round((importProgress.current / Math.max(1, importProgress.total)) * 100)}%</span>
+              </div>
+
+              {/* Progress bar */}
+              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden mt-1.5 border border-slate-200 dark:border-zinc-700">
+                <div
+                  className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-300 rounded-full"
+                  style={{
+                    width: `${Math.round((importProgress.current / Math.max(1, importProgress.total)) * 100)}%`,
+                  }}
+                />
+              </div>
+
+              <p className="text-[11px] text-slate-400 mt-2 truncate font-mono">
+                {importProgress.currentFileName}
+              </p>
             </div>
           </div>
         </div>
