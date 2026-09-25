@@ -12,6 +12,11 @@ import { exportNotebookAsPdf, exportCurrentPageAsPng } from './pdf/pdfExporter';
 import { GoogleDriveService, type CloudAccount, type SyncStatusInfo } from './services/googleDrive';
 import { CloudSettingsModal } from './components/Modals/CloudSettingsModal';
 
+const STORAGE_KEY_FOLDERS = 'mednotes_library_folders_v2';
+const STORAGE_KEY_NOTEBOOKS = 'mednotes_library_notebooks_v2';
+const STORAGE_KEY_OPEN_TABS = 'mednotes_open_tabs_v2';
+const STORAGE_KEY_ACTIVE_NB = 'mednotes_active_notebook_v2';
+
 const DEFAULT_PAGE_WIDTH = 820;
 const DEFAULT_PAGE_HEIGHT = 1160;
 
@@ -97,14 +102,85 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  // Library State
-  const [folders, setFolders] = useState<Folder[]>(INITIAL_FOLDERS);
-  const [notebooks, setNotebooks] = useState<Notebook[]>(INITIAL_NOTEBOOKS);
+  // Library State (Persisted in LocalStorage)
+  const [folders, setFolders] = useState<Folder[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_FOLDERS);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load folders from localStorage', e);
+    }
+    return INITIAL_FOLDERS;
+  });
+
+  const [notebooks, setNotebooks] = useState<Notebook[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_NOTEBOOKS);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load notebooks from localStorage', e);
+    }
+    return INITIAL_NOTEBOOKS;
+  });
+
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
 
-  // Tabs and Active Notebook State in Editor
-  const [openNotebookIds, setOpenNotebookIds] = useState<string[]>(['nb_anatomy']);
-  const [activeNotebookId, setActiveNotebookId] = useState<string>('nb_anatomy');
+  // Tabs and Active Notebook State in Editor (Persisted)
+  const [openNotebookIds, setOpenNotebookIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_OPEN_TABS);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return ['nb_anatomy'];
+  });
+
+  const [activeNotebookId, setActiveNotebookId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_ACTIVE_NB);
+      if (saved) return saved;
+    } catch {}
+    return 'nb_anatomy';
+  });
+
+  // Auto-persist folders, notebooks, tabs to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_FOLDERS, JSON.stringify(folders));
+    } catch (e) {
+      console.warn('Failed to save folders to localStorage', e);
+    }
+  }, [folders]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_NOTEBOOKS, JSON.stringify(notebooks));
+    } catch (e) {
+      console.warn('Failed to save notebooks to localStorage', e);
+    }
+  }, [notebooks]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_OPEN_TABS, JSON.stringify(openNotebookIds));
+    } catch {}
+  }, [openNotebookIds]);
+
+  useEffect(() => {
+    try {
+      if (activeNotebookId) {
+        localStorage.setItem(STORAGE_KEY_ACTIVE_NB, activeNotebookId);
+      }
+    } catch {}
+  }, [activeNotebookId]);
 
   // Google Drive Cloud Auto-Sync State (GoodNotes Auto Backup)
   const gdrive = GoogleDriveService.getInstance();
@@ -161,8 +237,19 @@ export default function App() {
     setHistoryTick((t) => t + 1);
   }, []);
 
+  const fallbackNotebook: Notebook = {
+    id: 'nb_empty_fallback',
+    title: 'Sổ tay mới',
+    subject: 'Ghi chép',
+    folderId: null,
+    pages: [createInitialPage(1)],
+    currentPageIndex: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
   const activeNotebook =
-    notebooks.find((n) => n.id === activeNotebookId) || notebooks[0];
+    notebooks.find((n) => n.id === activeNotebookId) || notebooks[0] || fallbackNotebook;
 
   const currentPage =
     activeNotebook?.pages[activeNotebook.currentPageIndex] ||
