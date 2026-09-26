@@ -100,6 +100,10 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
   const erasedStrokesInSessionRef = useRef<Stroke[]>([]);
   const panStartRef = useRef<{ clientX: number; clientY: number; scrollLeft: number; scrollTop: number } | null>(null);
 
+  // Two-finger pinch state and cooldown to prevent stray strokes or accidental single-finger pans
+  const isPinchActiveRef = useRef<boolean>(false);
+  const pinchCooldownRef = useRef<number>(0);
+
   const { width, height, template, strokes, pdfPageNumber } = page;
   // A4: Cap DPI to max 2.0 (or 1.5 on mobile) to avoid excessive GPU texture allocation
   const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -156,6 +160,43 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
       }
     };
   }, [pdfPageNumber, notebookId]);
+
+  // Listen for two-finger pinch events from document container
+  useEffect(() => {
+    const handlePinchStart = () => {
+      isPinchActiveRef.current = true;
+      isDrawingRef.current = false;
+      isFingerPanningRef.current = false;
+      panStartRef.current = null;
+      currentPointsRef.current = [];
+      pendingPointsRef.current = [];
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      const draftCanvas = draftCanvasRef.current;
+      if (draftCanvas) {
+        const dCtx = draftCanvas.getContext('2d');
+        dCtx?.clearRect(0, 0, draftCanvas.width, draftCanvas.height);
+      }
+      if (bakedLiveCanvasRef.current) {
+        const bCtx = bakedLiveCanvasRef.current.getContext('2d');
+        bCtx?.clearRect(0, 0, bakedLiveCanvasRef.current.width, bakedLiveCanvasRef.current.height);
+      }
+    };
+
+    const handlePinchEnd = () => {
+      isPinchActiveRef.current = false;
+      pinchCooldownRef.current = Date.now() + 250;
+    };
+
+    window.addEventListener('mednotes:pinchstart', handlePinchStart);
+    window.addEventListener('mednotes:pinchend', handlePinchEnd);
+    return () => {
+      window.removeEventListener('mednotes:pinchstart', handlePinchStart);
+      window.removeEventListener('mednotes:pinchend', handlePinchEnd);
+    };
+  }, []);
 
   // Layer 1: Redraw Background Layer (PDF Page OR Template lines/grid/dots)
   const redrawBackground = useCallback(async () => {
@@ -442,8 +483,13 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
       }
     }
 
-    // B3: Ignore any touch event while pen is active or within the 500ms palm-rejection cooldown window
-    if (isFinger && palmRejectionActiveRef.current) {
+    // B3: Ignore any touch event while pen is active or within palm/pinch cooldown window
+    if (
+      isFinger &&
+      (palmRejectionActiveRef.current ||
+        isPinchActiveRef.current ||
+        Date.now() < pinchCooldownRef.current)
+    ) {
       return;
     }
 

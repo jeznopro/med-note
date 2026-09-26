@@ -784,23 +784,23 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
           {/* Zoom Controls */}
           <div className="flex items-center gap-1 bg-slate-100/90 dark:bg-zinc-800 px-1.5 py-0.5 rounded-lg text-xs">
             <button
-              onClick={() => onZoomChange(Math.max(0.4, zoom - 0.1))}
+              onClick={() => onZoomChange(Math.max(0.35, Number((zoom - 0.1).toFixed(2))))}
               className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded cursor-pointer"
-              title="Thu nhỏ"
+              title="Thu nhỏ (Ctrl - hoặc chụm 2 ngón tay)"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => onZoomChange(1.0)}
               className="font-mono text-[11px] px-1 hover:underline cursor-pointer"
-              title="Khôi phục 100%"
+              title="Khôi phục 100% (Ctrl 0)"
             >
               {Math.round(zoom * 100)}%
             </button>
             <button
-              onClick={() => onZoomChange(Math.min(2.5, zoom + 0.1))}
+              onClick={() => onZoomChange(Math.min(3.0, Number((zoom + 0.1).toFixed(2))))}
               className="p-1 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded cursor-pointer"
-              title="Phóng to"
+              title="Phóng to (Ctrl + hoặc bung 2 ngón tay)"
             >
               <ZoomIn className="w-3.5 h-3.5" />
             </button>

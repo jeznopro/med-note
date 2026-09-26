@@ -23,6 +23,8 @@ import { GoogleDriveService, type CloudAccount, type SyncStatusInfo } from './se
 import { CloudSettingsModal } from './components/Modals/CloudSettingsModal';
 import { BottomPageNav } from './components/Toolbar/BottomPageNav';
 import { deletePdfBinary, saveNotebooksToIdb, loadNotebooksFromIdb } from './services/pdfStorage';
+import { ZoomIn } from 'lucide-react';
+import { useZoomGesture } from './hooks/useZoomGesture';
 
 const STORAGE_KEY_FOLDERS = 'mednotes_library_folders_v2';
 const STORAGE_KEY_NOTEBOOKS = 'mednotes_library_notebooks_v2';
@@ -390,6 +392,29 @@ export default function App() {
     scale: 1.0,
     offsetX: 0,
     offsetY: 0,
+  });
+
+  const editorContainerRef = useRef<HTMLElement | null>(null);
+  const [zoomToast, setZoomToast] = useState<{ visible: boolean; percent: number } | null>(null);
+  const zoomToastTimeoutRef = useRef<number | null>(null);
+
+  const handleZoomToast = useCallback((scale: number) => {
+    const percent = Math.round(scale * 100);
+    setZoomToast({ visible: true, percent });
+    if (zoomToastTimeoutRef.current !== null) {
+      window.clearTimeout(zoomToastTimeoutRef.current);
+    }
+    zoomToastTimeoutRef.current = window.setTimeout(() => {
+      setZoomToast((prev) => (prev ? { ...prev, visible: false } : null));
+    }, 1200);
+  }, []);
+
+  useZoomGesture({
+    containerRef: editorContainerRef,
+    viewMode,
+    transform,
+    setTransform,
+    onZoomToast: handleZoomToast,
   });
 
   // Apple Pencil Discrimination Mode: Stylus writes with pressure, finger scrolls (Palm Rejection)
@@ -1289,9 +1314,10 @@ export default function App() {
             currentTemplate={currentPage.template}
             onTemplateChange={handleTemplateChange}
             zoom={transform.scale}
-            onZoomChange={(newZoom) =>
-              setTransform((prev) => ({ ...prev, scale: newZoom }))
-            }
+            onZoomChange={(newZoom) => {
+              setTransform((prev) => ({ ...prev, scale: newZoom }));
+              handleZoomToast(newZoom);
+            }}
             onClearPage={handleClearPage}
             isDarkMode={isDarkMode}
             onToggleDarkMode={() => setIsDarkMode((d) => !d)}
@@ -1317,6 +1343,7 @@ export default function App() {
 
             <main
               id="editor-main-container"
+              ref={editorContainerRef as React.RefObject<HTMLElement>}
               className={`flex-1 overflow-auto relative ${
                 isDarkMode ? 'bg-zinc-950' : 'bg-[#EAEFF5]'
               }`}
@@ -1396,6 +1423,20 @@ export default function App() {
               onToggleScrollMode={() => setScrollMode((m) => (m === 'continuous' ? 'single' : 'continuous'))}
               isDarkMode={isDarkMode}
             />
+
+            {/* Zoom Percentage Toast Indicator */}
+            {zoomToast && (
+              <div
+                className={`fixed bottom-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all duration-200 ${
+                  zoomToast.visible ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
+                }`}
+              >
+                <div className="px-3.5 py-1.5 rounded-full bg-zinc-900/90 text-white dark:bg-white/90 dark:text-zinc-900 backdrop-blur-md shadow-xl text-xs font-mono font-bold tracking-wide flex items-center gap-1.5 border border-white/10 dark:border-zinc-800">
+                  <ZoomIn className="w-3.5 h-3.5" />
+                  <span>{zoomToast.percent}%</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
