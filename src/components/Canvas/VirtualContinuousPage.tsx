@@ -79,9 +79,10 @@ const VirtualContinuousPageComponent: React.FC<VirtualContinuousPageProps> = ({
     <div
       id={`page-container-${index}`}
       ref={containerRef}
-      className="relative flex flex-col items-center"
+      className="relative flex flex-col items-center mx-auto"
       onClick={() => onSelectPage(index)}
       style={{
+        width: `${scaledWidth}px`,
         minWidth: `${scaledWidth}px`,
         minHeight: `${scaledHeight + 28}px`,
       }}
@@ -234,9 +235,19 @@ export const VirtualizedPageList: React.FC<VirtualizedPageListProps> = ({
     enabled: useWindowVirtualizer,
   });
 
+  // Compute maximum scaled width across all pages (or fallback to standard 820 * zoom)
+  const maxScaledWidth = React.useMemo(() => {
+    return pages.reduce((max, p) => Math.max(max, Math.round(p.width * zoom)), Math.round(820 * zoom));
+  }, [pages, zoom]);
+
   if (!useWindowVirtualizer) {
     return (
-      <div className="w-fit min-w-full flex flex-col items-center gap-8 py-8 pb-36 min-h-full">
+      <div
+        className="w-full min-w-full flex flex-col items-center gap-8 py-8 pb-36 min-h-full mx-auto"
+        style={{
+          minWidth: `max(100%, ${maxScaledWidth + 32}px)`,
+        }}
+      >
         {pages.map((p, idx) => (
           <VirtualContinuousPage
             key={p.id}
@@ -266,14 +277,14 @@ export const VirtualizedPageList: React.FC<VirtualizedPageListProps> = ({
   }
 
   const virtualItems = rowVirtualizer.getVirtualItems();
-  const maxScaledWidth = pages.reduce((max, p) => Math.max(max, Math.round(p.width * zoom)), 820);
 
   return (
     <div
-      className="w-fit min-w-full flex flex-col items-center py-8 pb-36 relative"
+      className="w-full min-w-full flex flex-col items-center py-8 pb-36 relative mx-auto"
       style={{
         height: `${rowVirtualizer.getTotalSize() + 140}px`,
-        minWidth: `${maxScaledWidth + 32}px`,
+        minWidth: `max(100%, ${maxScaledWidth + 32}px)`,
+        width: '100%',
       }}
     >
       {virtualItems.map((virtualRow) => {
@@ -292,7 +303,7 @@ export const VirtualizedPageList: React.FC<VirtualizedPageListProps> = ({
               width: '100%',
               transform: `translateY(${virtualRow.start + 32}px)`,
             }}
-            className="flex flex-col items-center"
+            className="flex flex-col items-center justify-center w-full"
           >
             <VirtualContinuousPage
               page={p}

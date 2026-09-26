@@ -822,9 +822,9 @@ export default function App() {
     setActiveNotebookId(notebook.id);
     if (typeof window !== 'undefined') {
       const screenWidth = window.innerWidth;
-      if (screenWidth < 768) {
+      if (screenWidth < 860) {
         setIsSidebarOpen(false);
-        const mobileScale = Math.max(0.35, Math.min(1.0, (screenWidth - 24) / 820));
+        const mobileScale = Math.max(0.35, Math.min(1.0, (screenWidth - 32) / 820));
         setTransform({ scale: mobileScale, offsetX: 0, offsetY: 0 });
       } else {
         setTransform({ scale: 1.0, offsetX: 0, offsetY: 0 });
@@ -1352,8 +1352,13 @@ export default function App() {
                   }}
                 />
               ) : (
-                <div className="w-fit min-w-full flex flex-col items-center py-8 pb-36 min-h-full">
-                  <div className="relative flex flex-col items-center">
+                <div
+                  className="w-full min-w-full flex flex-col items-center py-8 pb-36 min-h-full mx-auto"
+                  style={{
+                    minWidth: `max(100%, ${Math.round(currentPage.width * transform.scale) + 32}px)`,
+                  }}
+                >
+                  <div className="relative flex flex-col items-center mx-auto">
                     <div className="text-[11px] font-mono text-slate-400 font-semibold mb-1 select-none">
                       Trang {activeNotebook.currentPageIndex + 1} / {activeNotebook.pages.length}
                     </div>

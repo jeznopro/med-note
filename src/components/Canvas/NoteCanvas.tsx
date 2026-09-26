@@ -782,7 +782,7 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative flex flex-col items-center select-none"
+      className="relative flex flex-col items-center select-none mx-auto"
       style={{
         width: `${scaledWidth}px`,
         minWidth: `${scaledWidth}px`,
