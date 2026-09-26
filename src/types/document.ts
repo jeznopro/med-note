@@ -49,6 +49,7 @@ export interface Notebook {
   isFavorite?: boolean;
   pdfDataUrl?: string;     // base64 / blob URL for PDF document
   pdfFileName?: string;
+  drivePdfFileId?: string; // Google Drive File ID of the uploaded PDF binary
   pages: Page[];
   currentPageIndex: number;
   coverColor?: string;

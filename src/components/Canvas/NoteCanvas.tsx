@@ -16,11 +16,14 @@ import {
   cancelActiveRender,
   cleanupPdfPage,
 } from '../../pdf/pdfLoader';
-import { Plus, Sparkles, ArrowRight } from 'lucide-react';
+import { Plus, Sparkles, ArrowRight, FileText, RefreshCw, Upload } from 'lucide-react';
 
 interface NoteCanvasProps {
   page: Page;
   notebookId?: string;
+  notebookTitle?: string;
+  pdfFileName?: string;
+  drivePdfFileId?: string;
   pdfDataUrl?: string;
   toolState: ToolState;
   transform: CanvasTransform;
@@ -41,6 +44,9 @@ const SLIDING_WINDOW_OVERLAP = 12;
 const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
   page,
   notebookId,
+  notebookTitle,
+  pdfFileName,
+  drivePdfFileId,
   pdfDataUrl,
   toolState,
   transform,
@@ -53,6 +59,8 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
   isPencilMode = true,
 }) => {
   const [showAutoPageToast, setShowAutoPageToast] = useState(false);
+  const [pdfLoadError, setPdfLoadError] = useState(false);
+  const [isRetryingPdf, setIsRetryingPdf] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isInViewport, setIsInViewport] = useState(() => (page.pageNumber ?? 1) <= 2);
 
@@ -156,8 +164,31 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
     if (!canvas) return;
 
     if (pdfPageNumber && (pdfDataUrl || notebookId)) {
+      // 1. Immediately paint clean crisp white paper so it is NEVER dark or empty
+      const initialCtx = canvas.getContext('2d');
+      if (initialCtx) {
+        initialCtx.save();
+        initialCtx.setTransform(1, 0, 0, 1, 0, 0);
+        initialCtx.clearRect(0, 0, canvas.width, canvas.height);
+        initialCtx.scale(dpr, dpr);
+        initialCtx.fillStyle = '#FFFFFF';
+        initialCtx.fillRect(0, 0, width, height);
+
+        initialCtx.fillStyle = '#64748B';
+        initialCtx.font = '500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        initialCtx.textAlign = 'center';
+        initialCtx.fillText(`Đang nạp Trang ${pdfPageNumber}...`, width / 2, height / 2);
+        initialCtx.restore();
+      }
+
       try {
-        const pdfDoc = await getPdfDocument(pdfDataUrl || '', notebookId);
+        const pdfDoc = await getPdfDocument(
+          pdfDataUrl || '',
+          notebookId,
+          notebookTitle,
+          pdfFileName,
+          drivePdfFileId
+        );
         await renderPdfPageToContext(
           pdfDoc,
           pdfPageNumber,
@@ -170,8 +201,10 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
             renderTasksRef.current.set(pdfPageNumber, task);
           }
         );
+        setPdfLoadError(false);
       } catch (err) {
-        console.error('Failed to render PDF page on canvas:', err);
+        console.warn('Failed to render PDF page on canvas:', err);
+        setPdfLoadError(true);
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.save();
@@ -180,19 +213,6 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
           ctx.scale(dpr, dpr);
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, width, height);
-
-          ctx.fillStyle = '#334155';
-          ctx.font = 'bold 18px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(`Trang PDF ${pdfPageNumber}`, width / 2, height / 2 - 24);
-
-          ctx.fillStyle = '#64748B';
-          ctx.font = '13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-          ctx.fillText('Đang nạp hoặc cần đồng bộ file PDF gốc từ Cloud...', width / 2, height / 2 + 8);
-
-          ctx.fillStyle = '#94A3B8';
-          ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-          ctx.fillText('(Nếu dùng thiết bị mới, vui lòng bấm biểu tượng Cloud để tải dữ liệu)', width / 2, height / 2 + 32);
           ctx.restore();
         }
       }
@@ -207,7 +227,7 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
         ctx.restore();
       }
     }
-  }, [width, height, template, isDarkMode, dpr, pdfDataUrl, pdfPageNumber, notebookId, isInViewport]);
+  }, [width, height, template, isDarkMode, dpr, pdfDataUrl, pdfPageNumber, notebookId, notebookTitle, pdfFileName, drivePdfFileId, isInViewport]);
 
   // Layer 2: Redraw Committed Ink Layer (Highlighters then Pens)
   const redrawInk = useCallback(
@@ -790,7 +810,7 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
           {/* Paper Sheet Container with GoodNotes-style elevation */}
           <div
             className={`relative shadow-2xl transition-shadow ${
-              isDarkMode
+              isDarkMode && !pdfPageNumber
                 ? 'shadow-black/60 ring-1 ring-zinc-800 bg-[#18181B]'
                 : 'shadow-slate-400/30 ring-1 ring-slate-200 bg-white'
             }`}
@@ -815,6 +835,69 @@ const NoteCanvasComponent: React.FC<NoteCanvasProps> = ({
               height={pixelHeight}
               className="absolute inset-0 w-full h-full pointer-events-none rounded-xs"
             />
+
+            {/* If PDF Binary could not be found locally or on Google Drive yet */}
+            {pdfLoadError && (
+              <div className="absolute inset-0 bg-white/95 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center z-15 select-none rounded-xs">
+                <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mb-3 shadow-xs">
+                  <FileText className="w-7 h-7 stroke-[1.8]" />
+                </div>
+                <h3 className="text-base font-bold text-slate-800">
+                  Trang PDF {pdfPageNumber}
+                </h3>
+                <p className="text-xs text-slate-500 max-w-xs mt-1.5 leading-relaxed">
+                  Chưa tải được file PDF gốc ({pdfFileName || notebookTitle || 'tài liệu'}) về điện thoại này.
+                </p>
+
+                <div className="flex flex-col sm:flex-row gap-2.5 mt-5">
+                  <button
+                    onClick={async () => {
+                      setIsRetryingPdf(true);
+                      try {
+                        const { GoogleDriveService } = await import('../../services/googleDrive');
+                        await GoogleDriveService.getInstance().fetchPdfBinaryByNotebook(
+                          notebookId || '',
+                          notebookTitle,
+                          pdfFileName,
+                          drivePdfFileId
+                        );
+                        await redrawBackground();
+                      } finally {
+                        setIsRetryingPdf(false);
+                      }
+                    }}
+                    disabled={isRetryingPdf}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-sm cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRetryingPdf ? 'animate-spin' : ''}`} />
+                    <span>{isRetryingPdf ? 'Đang tìm trên Cloud...' : 'Tải lại từ Google Drive'}</span>
+                  </button>
+
+                  <label className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 shadow-xs cursor-pointer transition-all">
+                    <Upload className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Chọn file PDF từ máy</span>
+                    <input
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file && notebookId) {
+                          const { savePdfBinary } = await import('../../services/pdfStorage');
+                          const buf = await file.arrayBuffer();
+                          await savePdfBinary(notebookId, buf, file.name);
+                          await redrawBackground();
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <p className="text-[11px] text-slate-400 mt-4 max-w-xs">
+                  Mẹo: Nếu bạn đã nạp file trên máy tính, hãy bấm biểu tượng Google Drive trên máy tính để đồng bộ file PDF gốc lên đám mây.
+                </p>
+              </div>
+            )}
 
             {/* Dynamic Pen Tip Dot Cursor */}
             {toolState.currentTool !== 'pan' && (
@@ -919,6 +1002,9 @@ export const NoteCanvas = React.memo(NoteCanvasComponent, (prev, next) => {
     prev.isPencilMode === next.isPencilMode &&
     prev.isLastPage === next.isLastPage &&
     prev.notebookId === next.notebookId &&
+    prev.notebookTitle === next.notebookTitle &&
+    prev.pdfFileName === next.pdfFileName &&
+    prev.drivePdfFileId === next.drivePdfFileId &&
     prev.pdfDataUrl === next.pdfDataUrl &&
     prev.toolState.currentTool === next.toolState.currentTool &&
     prev.toolState.pen.color === next.toolState.pen.color &&

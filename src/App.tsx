@@ -333,6 +333,9 @@ export default function App() {
           } else {
             setSyncInfo((prev) => ({ ...prev, status: 'idle' }));
           }
+        } else if (cloudAccount) {
+          // Even if notebooks were already loaded from localStorage, ensure all PDF binaries exist in IndexedDB
+          gdrive.ensureLocalPdfBinaries(notebooks).catch(() => {});
         }
       } catch (err) {
         console.warn('Auto restore on startup failed:', err);
@@ -873,6 +876,12 @@ export default function App() {
       const importedNb = await createNotebookFromPdf(file);
       importedNb.folderId = folderId || null;
       setNotebooks((prev) => [importedNb, ...prev]);
+      hasUnsavedChangesRef.current = true;
+      if (cloudAccount) {
+        gdrive.uploadNotebook(importedNb, cloudAccount, file, undefined)
+          .then(() => gdrive.uploadMasterLibrary([importedNb, ...notebooks], folders, cloudAccount))
+          .catch((e) => console.warn('Could not auto-upload newly imported PDF to Drive:', e));
+      }
       setScrollMode('continuous');
       handleOpenNotebook(importedNb);
     } catch (err) {
@@ -1320,6 +1329,9 @@ export default function App() {
                   pages={activeNotebook.pages}
                   currentPageIndex={activeNotebook.currentPageIndex}
                   notebookId={activeNotebook.id}
+                  notebookTitle={activeNotebook.title}
+                  pdfFileName={activeNotebook.pdfFileName}
+                  drivePdfFileId={activeNotebook.drivePdfFileId}
                   pdfDataUrl={activeNotebook.pdfDataUrl}
                   toolState={toolState}
                   transform={transform}
@@ -1348,6 +1360,9 @@ export default function App() {
                     <NoteCanvas
                       page={currentPage}
                       notebookId={activeNotebook.id}
+                      notebookTitle={activeNotebook.title}
+                      pdfFileName={activeNotebook.pdfFileName}
+                      drivePdfFileId={activeNotebook.drivePdfFileId}
                       pdfDataUrl={activeNotebook.pdfDataUrl}
                       toolState={toolState}
                       transform={transform}

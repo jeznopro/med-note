@@ -86,7 +86,10 @@ function queueThumbnailTask(task: () => Promise<void>): Promise<void> {
 
 export async function getPdfDocument(
   source: string | ArrayBuffer | Uint8Array,
-  notebookId?: string
+  notebookId?: string,
+  notebookTitle?: string,
+  pdfFileName?: string,
+  drivePdfFileId?: string
 ): Promise<PDFDocumentProxy> {
   const primaryKey = notebookId || (typeof source === 'string' && source ? source : 'active_pdf_buffer');
 
@@ -116,6 +119,22 @@ export async function getPdfDocument(
       const storedBuffer = await getPdfBinary(notebookId);
       if (storedBuffer) {
         binaryData = new Uint8Array(storedBuffer);
+      } else {
+        // Auto-fetch missing PDF binary from Google Drive on-demand (e.g. newly opened on phone)
+        try {
+          const { GoogleDriveService } = await import('../services/googleDrive');
+          const driveBuf = await GoogleDriveService.getInstance().fetchPdfBinaryByNotebook(
+            notebookId,
+            notebookTitle,
+            pdfFileName,
+            drivePdfFileId
+          );
+          if (driveBuf && driveBuf.byteLength > 0) {
+            binaryData = new Uint8Array(driveBuf);
+          }
+        } catch (fetchErr) {
+          console.warn('Could not auto-fetch PDF from Google Drive on demand:', fetchErr);
+        }
       }
     }
 

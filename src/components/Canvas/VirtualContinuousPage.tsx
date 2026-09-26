@@ -12,6 +12,9 @@ interface VirtualContinuousPageProps {
   total: number;
   isActive: boolean;
   notebookId: string;
+  notebookTitle?: string;
+  pdfFileName?: string;
+  drivePdfFileId?: string;
   pdfDataUrl?: string;
   toolState: ToolState;
   transform: CanvasTransform;
@@ -31,6 +34,9 @@ const VirtualContinuousPageComponent: React.FC<VirtualContinuousPageProps> = ({
   total,
   isActive,
   notebookId,
+  notebookTitle,
+  pdfFileName,
+  drivePdfFileId,
   pdfDataUrl,
   toolState,
   transform,
@@ -88,6 +94,9 @@ const VirtualContinuousPageComponent: React.FC<VirtualContinuousPageProps> = ({
         <NoteCanvas
           page={page}
           notebookId={notebookId}
+          notebookTitle={notebookTitle}
+          pdfFileName={pdfFileName}
+          drivePdfFileId={drivePdfFileId}
           pdfDataUrl={pdfDataUrl}
           toolState={toolState}
           transform={transform}
@@ -155,6 +164,9 @@ export const VirtualContinuousPage = React.memo(VirtualContinuousPageComponent, 
     prev.isActive === next.isActive &&
     prev.isLastPage === next.isLastPage &&
     prev.notebookId === next.notebookId &&
+    prev.notebookTitle === next.notebookTitle &&
+    prev.pdfFileName === next.pdfFileName &&
+    prev.drivePdfFileId === next.drivePdfFileId &&
     prev.pdfDataUrl === next.pdfDataUrl &&
     prev.transform.scale === next.transform.scale &&
     prev.transform.offsetX === next.transform.offsetX &&
@@ -170,6 +182,9 @@ interface VirtualizedPageListProps {
   pages: Page[];
   currentPageIndex: number;
   notebookId: string;
+  notebookTitle?: string;
+  pdfFileName?: string;
+  drivePdfFileId?: string;
   pdfDataUrl?: string;
   toolState: ToolState;
   transform: CanvasTransform;
@@ -186,6 +201,9 @@ export const VirtualizedPageList: React.FC<VirtualizedPageListProps> = ({
   pages,
   currentPageIndex,
   notebookId,
+  notebookTitle,
+  pdfFileName,
+  drivePdfFileId,
   pdfDataUrl,
   toolState,
   transform,
@@ -227,6 +245,9 @@ export const VirtualizedPageList: React.FC<VirtualizedPageListProps> = ({
             total={pages.length}
             isActive={currentPageIndex === idx}
             notebookId={notebookId}
+            notebookTitle={notebookTitle}
+            pdfFileName={pdfFileName}
+            drivePdfFileId={drivePdfFileId}
             pdfDataUrl={pdfDataUrl}
             toolState={toolState}
             transform={transform}
@@ -279,6 +300,9 @@ export const VirtualizedPageList: React.FC<VirtualizedPageListProps> = ({
               total={pages.length}
               isActive={currentPageIndex === idx}
               notebookId={notebookId}
+              notebookTitle={notebookTitle}
+              pdfFileName={pdfFileName}
+              drivePdfFileId={drivePdfFileId}
               pdfDataUrl={pdfDataUrl}
               toolState={toolState}
               transform={transform}

@@ -322,18 +322,29 @@ export class GoogleDriveService {
 
     const cleanTitle = notebook.title.replace(/[/\\?%*:|"<>]/g, '_').trim();
 
-    // 1. Upload/Update Rendered PDF file (.pdf) for direct viewing on Google Drive & mobile
-    if (pdfBlob) {
+    // 1. Upload/Update Rendered or Original PDF file (.pdf) for direct viewing on Google Drive & mobile
+    let effectivePdfBlob = pdfBlob;
+    if (!effectivePdfBlob && (notebook.pdfFileName || notebook.pages.some((p) => p.pdfPageNumber))) {
+      try {
+        const storedBuf = await getPdfBinary(notebook.id);
+        if (storedBuf && storedBuf.byteLength > 0) {
+          effectivePdfBlob = new Blob([storedBuf], { type: 'application/pdf' });
+        }
+      } catch {}
+    }
+
+    if (effectivePdfBlob) {
       try {
         const pdfFileName = `${cleanTitle}.pdf`;
         // Search in target subfolder first
-        const qPdf = `name='${pdfFileName}' and '${targetFolderId}' in parents and trashed=false`;
+        const escapedPdfName = pdfFileName.replace(/'/g, "\\'");
+        const qPdf = `name='${escapedPdfName}' and '${targetFolderId}' in parents and trashed=false`;
         const pdfSearchRes = await fetch(
           `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qPdf)}&fields=files(id)`,
           { headers: { Authorization: `Bearer ${account.accessToken}` } }
         );
 
-        let targetPdfId: string | null = null;
+        let targetPdfId: string | null = notebook.drivePdfFileId || null;
         if (pdfSearchRes.ok) {
           const data = await pdfSearchRes.json();
           if (data.files && data.files.length > 0) {
@@ -343,7 +354,7 @@ export class GoogleDriveService {
 
         // If not found in target subfolder, but target is a subfolder, check rootFolderId and move it!
         if (!targetPdfId && targetFolderId !== rootFolderId) {
-          const qRoot = `name='${pdfFileName}' and '${rootFolderId}' in parents and trashed=false`;
+          const qRoot = `name='${escapedPdfName}' and '${rootFolderId}' in parents and trashed=false`;
           const rootSearchRes = await fetch(
             `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qRoot)}&fields=files(id)`,
             { headers: { Authorization: `Bearer ${account.accessToken}` } }
@@ -390,6 +401,7 @@ export class GoogleDriveService {
 
         // Upload/Update binary content
         if (targetPdfId) {
+          notebook.drivePdfFileId = targetPdfId;
           const uploadRes = await fetch(
             `https://www.googleapis.com/upload/drive/v3/files/${targetPdfId}?uploadType=media`,
             {
@@ -398,7 +410,7 @@ export class GoogleDriveService {
                 Authorization: `Bearer ${account.accessToken}`,
                 'Content-Type': 'application/pdf',
               },
-              body: pdfBlob,
+              body: effectivePdfBlob,
             }
           );
           if (!uploadRes.ok) {
@@ -692,6 +704,101 @@ export class GoogleDriveService {
     }
   }
 
+  /**
+   * On-demand fetch of a single notebook's PDF binary from Google Drive if missing locally.
+   * Searches by drivePdfFileId, exact title.pdf, pdfFileName, or fuzzy title match.
+   */
+  public async fetchPdfBinaryByNotebook(
+    notebookId: string,
+    title?: string,
+    pdfFileName?: string,
+    drivePdfFileId?: string
+  ): Promise<ArrayBuffer | null> {
+    const account = this.getSavedAccount();
+    if (!account || !account.accessToken || account.accessToken.startsWith('demo_token_')) {
+      return null;
+    }
+
+    const accessToken = account.accessToken;
+
+    try {
+      // 1. If we already know the exact Google Drive File ID, download directly in 1 request!
+      let targetFileId: string | null = drivePdfFileId || null;
+
+      // 2. Otherwise search Drive using exact and fuzzy queries
+      if (!targetFileId) {
+        const rawTitle = (title || pdfFileName || '').replace(/\.pdf$/i, '').trim();
+        const cleanTitle = rawTitle.replace(/[/\\?%*:|"<>]/g, '_').trim();
+        const candidateNames = Array.from(
+          new Set(
+            [
+              pdfFileName,
+              cleanTitle ? `${cleanTitle}.pdf` : undefined,
+              rawTitle ? `${rawTitle}.pdf` : undefined,
+            ].filter((x): x is string => !!x && x.length > 0)
+          )
+        );
+
+        for (const candidate of candidateNames) {
+          const escaped = candidate.replace(/'/g, "\\'");
+          const qExact = `name='${escaped}' and mimeType='application/pdf' and trashed=false`;
+          const res = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qExact)}&fields=files(id,name)&pageSize=5`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data.files && data.files.length > 0) {
+              targetFileId = data.files[0].id;
+              break;
+            }
+          }
+        }
+
+        // 3. Fuzzy search by title substring if exact match wasn't found
+        if (!targetFileId && cleanTitle.length >= 3) {
+          const shortPrefix = cleanTitle.slice(0, 24).replace(/'/g, "\\'");
+          const qFuzzy = `name contains '${shortPrefix}' and mimeType='application/pdf' and trashed=false`;
+          const fuzzyRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qFuzzy)}&fields=files(id,name)&pageSize=5`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (fuzzyRes.ok) {
+            const data = await fuzzyRes.json();
+            if (data.files && data.files.length > 0) {
+              targetFileId = data.files[0].id;
+            }
+          }
+        }
+      }
+
+      if (targetFileId) {
+        const pdfRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${targetFileId}?alt=media`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (pdfRes.ok) {
+          const buffer = await pdfRes.arrayBuffer();
+          if (buffer && buffer.byteLength > 0) {
+            await savePdfBinary(notebookId, buffer, pdfFileName || `${title || notebookId}.pdf`);
+            return buffer;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch PDF binary on-demand from Google Drive:', err);
+    }
+
+    return null;
+  }
+
+  // Ensure all local PDF notebooks have their binary in IndexedDB; if missing, pull from Drive
+  public async ensureLocalPdfBinaries(notebooks: Notebook[]): Promise<void> {
+    const account = this.getSavedAccount();
+    if (!account || !account.accessToken || account.accessToken.startsWith('demo_token_')) return;
+    await this.restorePdfBinariesForNotebooks(notebooks, account.accessToken);
+  }
+
   // Auto-download original PDF binary files from Google Drive if missing on local device
   private async restorePdfBinariesForNotebooks(
     notebooks: Notebook[],
@@ -704,30 +811,17 @@ export class GoogleDriveService {
       try {
         const existing = await getPdfBinary(nb.id);
         if (!existing && !accessToken.startsWith('demo_token_')) {
-          const cleanTitle = nb.title.replace(/[/\\?%*:|"<>]/g, '_').trim();
-          const pdfName = nb.pdfFileName || `${cleanTitle}.pdf`;
-          const qPdf = `name='${pdfName}' and mimeType='application/pdf' and trashed=false`;
-          const searchPdfRes = await fetch(
-            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qPdf)}&fields=files(id)`,
-            { headers: { Authorization: `Bearer ${accessToken}` } }
+          const downloaded = await this.fetchPdfBinaryByNotebook(
+            nb.id,
+            nb.title,
+            nb.pdfFileName,
+            nb.drivePdfFileId
           );
-          if (searchPdfRes.ok) {
-            const data = await searchPdfRes.json();
-            if (data.files && data.files.length > 0) {
-              const fileId = data.files[0].id;
-              const pdfRes = await fetch(
-                `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-                { headers: { Authorization: `Bearer ${accessToken}` } }
-              );
-              if (pdfRes.ok) {
-                const buffer = await pdfRes.arrayBuffer();
-                await savePdfBinary(nb.id, buffer, pdfName);
-                nb.pdfDataUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
-              }
-            }
+          if (downloaded) {
+            nb.pdfDataUrl = `idb://${nb.id}`;
           }
         } else if (existing) {
-          nb.pdfDataUrl = URL.createObjectURL(new Blob([existing], { type: 'application/pdf' }));
+          nb.pdfDataUrl = `idb://${nb.id}`;
         }
       } catch (err) {
         console.warn('Could not auto-restore PDF binary for notebook:', nb.title, err);
